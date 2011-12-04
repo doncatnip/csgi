@@ -220,6 +220,7 @@ class transport:
                 , 'is_header_read': False
                 , 'is_handler_done': False
                 , 'status': 200
+                , 'force_chunked': False
                 }
 
             abort = False
@@ -264,8 +265,10 @@ class transport:
 
         def _write( self, data, socket, env ):
             if not env['is_header_send']:
-                if env['mode'] == 'response':
+                if env['mode'] == 'response' and not env['force_chunked']:
                     # more than 1 write = chunked response
+                    # TODO: set env['force_chunked'] when handler sets
+                    # transfer-encoding header to chunked
                     if not 'result_on_hold' in env:
                         env['result_on_hold'] = data
                         return
@@ -379,9 +382,6 @@ class transport:
             elif not keepalive or env['request_version'] == 'HTTP/1.0':
                 if 'Connection' not in response_headers_list:
                     response_headers.append(('Connection', 'close'))
-                else:
-                    pass
-                    # TODO
                 keepalive = False
 
             elif ('Connection', 'close') in response_headers:
