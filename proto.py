@@ -8,6 +8,19 @@ counteracting DRY.
 
 WSGI really should be only a handler ontop of a HTTP transport.
 
+The idea is as followes: find an wsgi-ish way to bubble a request from the
+very bottom ( the listener ) all the way up to some handler ( which could be
+a html page, or an amqp subscriber/publisher ).
+
+Every transport receives a socket, env per request as arguments and delivers
+a read and write method to its handler while populating env with transport-
+specific stuff.
+
+read is a callable which returns a list or generator, write is a callable,
+receiving one argument.
+
+A request is considered done by its handler when it returns.
+
 Status: prototype
 License: Public Domain
 """
@@ -169,8 +182,8 @@ class transport:
         def __init__( self, handler ):
             self.handler = handler
 
-        def __call__( self, socket ):
-            env = { 'socket': socket }
+        def __call__( self, socket, env ):
+            env['socket'] = socket
             self.handler( socket.__iter__(), socket.write, env )
 
 
@@ -179,8 +192,8 @@ class transport:
         def __init__( self, handler ):
             self.handler = handler
 
-        def __call__( self, socket ):
-            env = { 'socket':  socket }
+        def __call__( self, socket, env ):
+            env['socket'] = socket
 
             self.handler\
                 ( lambda: self._readlines( socket )
@@ -198,7 +211,6 @@ class transport:
             self.handler = handler
 
         def __call__( self, socket, env ):
-            print "call HTTP"
             env['socket'] = socket
 
             env['http'] = env_http = \
@@ -210,7 +222,6 @@ class transport:
                 , 'status': 200
                 }
 
-            print "new env: %s" % env
             abort = False
             if 'remoteclient' in env:
                 env_http['is_header_read'] = True
@@ -246,13 +257,10 @@ class transport:
             else:
                 socket.write(  "0\r\n\r\n"  )
 
-            print("finished ! %s" % (env_http))
             if env_http['keepalive']:
-                print("keep alive ... ")
                 self( socket, env )
             else:
                 socket.close()
-
 
         def _write( self, data, socket, env ):
             if not env['is_header_send']:
@@ -546,10 +554,11 @@ class Socket:
             (connection, address) = s.accept()
             yield (Connection( connection ), address)
 
-        try:
-            os.remove( self.host )
-        except OSError:
-            pass
+        if self.protocol == 'ipc':
+            try:
+                os.remove( self.host )
+            except OSError:
+                pass
 
 
 def echo_handler( arg ):
