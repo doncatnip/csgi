@@ -302,10 +302,13 @@ class transport:
                 env['is_header_read'] = True
 
             if not env['content_length']:
-                length = socket.readline()
-                return socket.read( int( length ) )
-
-            return socket.read( env['content_length'] )
+                while True:
+                    length = socket.readline()
+                    if length == 0:
+                        return
+                    yield socket.read( int( length ) )
+            
+            yield socket.read( env['content_length'] )
 
         def _check_http_version(self, version):
             if not version.startswith("HTTP/"):
