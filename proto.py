@@ -19,7 +19,7 @@ specific stuff.
 read is a callable which returns a list or generator, write is a callable,
 receiving one argument.
 
-A request is considered done by its handler when it returns.
+A request/connection is considered done by its handler when it returns.
 
 Status: prototype
 License: Public Domain
@@ -30,7 +30,7 @@ License: Public Domain
 from gevent.queue import Queue
 from gevent import spawn, spawn_later, sleep
 from gevent.event import AsyncResult
-from gevent import socket, monkey
+from gevent import socket
 from gevent.pywsgi import _BAD_REQUEST_RESPONSE, format_date_time
 
 import re, os, time
@@ -40,15 +40,23 @@ from mimetools import Message
 from StringIO import StringIO
 
 
-monkey.patch_all()
 
-port = 8082
+port = 8080
 class MISSING:
     pass
 
+def deepcopydict(org):
+    '''
+    much, much faster than deepcopy, for a dict of the simple python types.
+    '''
+    out = org.copy()
+    for k,v in org.iteritems():
+        if isinstance( v, dict ):
+            out[k] =  deepcopydict( v )
+
+    return out
 
 class Call:
-    _result = MISSING
     
     def __init__( self, resource, includeEnv=False ):
         self.resource = resource
@@ -183,7 +191,6 @@ class transport:
             self.handler = handler
 
         def __call__( self, socket, env ):
-            env['socket'] = socket
             self.handler( socket.__iter__(), socket.write, env )
 
 
@@ -193,8 +200,6 @@ class transport:
             self.handler = handler
 
         def __call__( self, socket, env ):
-            env['socket'] = socket
-
             self.handler\
                 ( lambda: self._readlines( socket )
                 , lambda data: socket.write( data+'\r\n' )
@@ -205,23 +210,31 @@ class transport:
                 yield line
 
     class HTTP:
+        # TODO: pipelining, read request body, client
         MessageClass = Message
 
-        def __init__( self, handler ):
+        def __init__( self, handler, force_chunked=False ):
             self.handler = handler
+            self.force_chunked = force_chunked
 
         def __call__( self, socket, env ):
-            env['socket'] = socket
+            env.setdefault( 'http', {} )
+            env_http = env['http'].get('_base_env',False)
+            if not env_http:
+                env_http =\
+                    { 'request': { 'header': None }
+                    , 'response': { 'header': None }
+                    , 'is_header_send': False
+                    , 'is_header_read': False
+                    , 'is_handler_done': False
+                    , 'status': 200
+                    , 'force_chunked': self.force_chunked
+                    }
+                env_http['_base_env'] = deepcopydict( env_http )
+            else:
+                env_http = deepcopydict( env_http )
 
-            env['http'] = env_http = \
-                { 'request': { 'header': None }
-                , 'response': { 'header': None }
-                , 'is_header_send': False
-                , 'is_header_read': False
-                , 'is_handler_done': False
-                , 'status': 200
-                , 'force_chunked': False
-                }
+            env['http'] = env_http
 
             abort = False
             if 'remoteclient' in env:
@@ -231,8 +244,8 @@ class transport:
                 
                 header = socket.readline()
                 if not header:
-                    socket.close()
                     return
+
                 elif not self._read_request_header( socket, env_http, header ):
                     socket.write( _BAD_REQUEST_RESPONSE )
                     env['status'] = 400
@@ -245,6 +258,7 @@ class transport:
                     ( lambda: self._read( socket, env_http )
                     , lambda data: self._write( data, socket, env_http )
                     , env )
+
             else:
                 env_http['keepalive'] = False
             
@@ -260,8 +274,7 @@ class transport:
 
             if env_http['keepalive']:
                 self( socket, env )
-            else:
-                socket.close()
+
 
         def _write( self, data, socket, env ):
             if not env['is_header_send']:
@@ -287,8 +300,12 @@ class transport:
                 header = socket.readline( )
                 self._read_response_header( header, env )
                 env['is_header_read'] = True
-           
-            return socket.read()
+
+            if not env['content_length']:
+                length = socket.readline()
+                return socket.read( int( length ) )
+
+            return socket.read( env['content_length'] )
 
         def _check_http_version(self, version):
             if not version.startswith("HTTP/"):
@@ -360,11 +377,12 @@ class transport:
                 , content_length=content_length
                 , keepalive=not close_connection
                 , request_version = request_version
+                , path=path
                 )
 
+            print headers.items()
             env['request']['header'] = headers
 
-            print "updated env: %s" % env
             return True
 
         def _serialize_headers( self, socket, env):
@@ -467,9 +485,12 @@ def Listen( *args, **kwargs):
     l.start()
 
 class _Listen:
-    def __init__( self, socket, handler ):
+    def __init__( self, socket, handler, create_env=None ):
         self.socket = socket
         self.handler = handler
+        if not create_env:
+            create_env = lambda: {}
+        self.create_env = create_env
 
     def start( self ):
         self.connected = True
@@ -478,7 +499,11 @@ class _Listen:
             spawn( self._handle_connection, connection, address )
 
     def _handle_connection( self, connection, address ):
-        env = {'remoteclient': {'address':address }}
+        env = self.create_env()
+        env.update\
+            ( remoteclient = { 'address':address }
+            , socket = connection
+            )
         self.handler( connection, env )
         connection.close()
             
@@ -535,7 +560,7 @@ class Socket:
         return Connection( gsocket )
 
     def accept( self ):
-
+        print "accept ..."
         if self.protocol == 'ipc':
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
@@ -567,17 +592,28 @@ def echo_handler( arg ):
     return "echo after %s seconds: %s" % ( seconds, arg)
 
 def hellohttp( read, write, env ):
-    i=0
-    while i<1000:
-        i+=1
-        write( '<h1>hello server !</h1>')
-        sleep(0.5)
+    body = ()
+    if env['http']['method'] == 'POST':
+        posted = ''.join( read() )
+        body = '<h1>%s</h1>' % posted
+    else:
+        body = ''.join\
+            ( ( '<label for="testform">say something:</label>'
+              , '<form method="post"><input id="testform" type="text" name="testinput"/></form>'
+              )
+            )
+
+    write\
+        ( '<html><header></header><body>%s</body></html>'\
+            % body
+        )
+
 
 #testServer = transport.Dummy( RPCRouter( 'test.echo', Call( echo_handler ) ) )
 
 server = Listen\
     ( Socket( 'tcp://localhost:%s' % port)
-    , transport.HTTP( hellohttp )
+    , transport.HTTP( hellohttp, force_chunked=True )
     )
 
 #client = ConnectionPool\
