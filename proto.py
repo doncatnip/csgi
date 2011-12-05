@@ -8,18 +8,18 @@ counteracting DRY.
 
 WSGI really should be only a handler ontop of a HTTP transport.
 
-The idea is as followes: find an wsgi-ish way to bubble a request from the
+The idea goes as followes: find an wsgi-ish way to bubble a 'request' from the
 very bottom ( the listener ) all the way up to some handler ( which could be
 a html page, or an amqp subscriber/publisher ).
 
-Every transport receives a socket, env per request as arguments and delivers
+Every transport receives (socket, env) per connection as arguments and delivers
 a read and write method to its handler while populating env with transport-
 specific stuff.
 
 read is a callable which returns a list or generator, write is a callable,
 receiving one argument.
 
-A request/connection is considered done by its handler when it returns.
+A request/connection is considered finished when its handler returns.
 
 Status: prototype
 License: Public Domain
@@ -41,7 +41,7 @@ from StringIO import StringIO
 
 
 
-port = 8080
+port = 8081
 class MISSING:
     pass
 
@@ -53,6 +53,8 @@ def deepcopydict(org):
     for k,v in org.iteritems():
         if isinstance( v, dict ):
             out[k] =  deepcopydict( v )
+        elif isinstance( v, list):
+            out[k] = v[:]
 
     return out
 
@@ -89,9 +91,18 @@ class EnvRouter:
             i+=1
 
         self.by = params['by']
+        self.on_not_found = params.get('on_not_found', lambda read, write, env: self._log_error( 'route not found .. env: %s' % (env,) ) )
 
     def __call__( self, read, write, env ):
+        handler = self.handler.get( self.by( env ), None )
+        if not handler:
+            self.on_not_found( read, write, env )
+            return
+
         self.handler[ self.by( env ) ]( read, write, env )
+
+    def _log_error( self, error ):
+        print error
 
 class RPCRouter:
 
@@ -210,7 +221,7 @@ class transport:
                 yield line
 
     class HTTP:
-        # TODO: pipelining, read request body, client
+        # TODO: pipelining, client
         MessageClass = Message
 
         def __init__( self, handler, force_chunked=False ):
@@ -219,22 +230,21 @@ class transport:
 
         def __call__( self, socket, env ):
             env.setdefault( 'http', {} )
-            env_http = env['http'].get('_base_env',False)
-            if not env_http:
-                env_http =\
-                    { 'request': { 'header': None }
-                    , 'response': { 'header': None }
-                    , 'is_header_send': False
-                    , 'is_header_read': False
-                    , 'is_handler_done': False
-                    , 'status': 200
-                    , 'force_chunked': self.force_chunked
-                    }
-                env_http['_base_env'] = deepcopydict( env_http )
+            base_env = env['http'].get('_base_env',False)
+            if not base_env:
+                env['_base_env'] = deepcopydict( env ) 
             else:
-                env_http = deepcopydict( env_http )
+                env = deepcopydict( base_env )
 
-            env['http'] = env_http
+            env['http'] = env_http =\
+                { 'request': { 'header': None }
+                , 'response': { 'header': None }
+                , 'is_header_send': False
+                , 'is_header_read': False
+                , 'is_handler_done': False
+                , 'status': 200
+                , 'force_chunked': self.force_chunked
+                }
 
             abort = False
             if 'remoteclient' in env:
@@ -400,7 +410,7 @@ class transport:
             if 'Date' not in response_headers_list:
                 response_headers.append(('Date', format_date_time(time.time())))
 
-            elif not keepalive or env['request_version'] == 'HTTP/1.0':
+            elif keepalive is False or env['request_version'] == 'HTTP/1.0':
                 if 'Connection' not in response_headers_list:
                     response_headers.append(('Connection', 'close'))
                 keepalive = False
@@ -614,9 +624,19 @@ def hellohttp( read, write, env ):
 
 #testServer = transport.Dummy( RPCRouter( 'test.echo', Call( echo_handler ) ) )
 
+def _404( read, write, env ):
+    env['http']['status'] = 404
+    write( '<html><body>404 - Not found</body></html>' )
+
 server = Listen\
     ( Socket( 'tcp://localhost:%s' % port)
-    , transport.HTTP( hellohttp, force_chunked=True )
+    , transport.HTTP\
+        ( EnvRouter\
+            ( '/', hellohttp
+            , by=lambda env: env['http']['path']
+            , on_not_found=_404
+            )
+        )
     )
 
 #client = ConnectionPool\
