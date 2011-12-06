@@ -76,59 +76,99 @@ class Call:
             result = self.resource( *args, **kwargs )
             write( result )
 
+class _Env:
+    class Router:
 
-class EnvRouter:
+        def __init__( self, *handlers, **params ):
+            self.handler = []
+            self.named_routes = {}
 
-    def __init__( self, *handlers, **params ):
-        self.handler = []
-        self.named_routes = {}
+            routes = set()
+            
+            for i in range( len(handlers) ):
+                (key, handler) = handlers[i]
+                if key in routes:
+                    raise SyntaxError( 'Routes must be unique' )
 
-        routes = set()
-        
-        for i in range( len(handlers) ):
-            (key, handler) = handlers[i]
-            if key in routes:
-                raise SyntaxError( 'Routes must be unique' )
+                routes.add( key )
+                if not hasattr( key, 'match' ) :
+                    self.named_routes[ key ] = handler
+                else:
+                    self.handler.append( (key, handler ) )
 
-            routes.add( key )
-            if not hasattr( key, 'match' ) :
-                self.named_routes[ key ] = handler
-            else:
-                self.handler.append( (key, handler ) )
+            self.by = params.pop('by')
+            self.on_not_found = params.pop\
+                ( 'on_not_found'
+                , lambda env, read, write: self._log_error( 'route not found .. env: %s' % (env,) )
+                )
 
-        self.by = params.pop('by')
-        self.on_not_found = params.pop\
-            ( 'on_not_found'
-            , lambda env, read, write: self._log_error( 'route not found .. env: %s' % (env,) )
-            )
+            if params:
+                raise SyntaxError( 'Invalid keyword arguments: %s' % params.keys()  )
 
-        if params:
-            raise SyntaxError( 'Invalid keyword arguments: %s' % params.keys()  )
+        def __call__( self, env, read, write ):
+            value = self.by( env )
+            handler = self.named_routes.get( value, None )
+            
+            env['route'] = {'path': value }
 
-    def __call__( self, env, read, write ):
-        value = self.by( env )
-        handler = self.named_routes.get( value, None )
-        env['route'] = {'path': value }
+            if not handler:
+                for (key,handler_) in self.handler:
+                    match = key.match( value )
+                    if match:
+                        groups = match.groupdict()
+                        if groups:
+                            env['route'].update( groups )
+                            
+                        handler = handler_
+                        break
 
-        if not handler:
-            for (key,handler_) in self.handler:
-                match = key.match( value )
-                if match:
-                    groups = match.groupdict()
-                    if groups:
-                        env['route'].update( groups )
-                        
-                    handler = handler_
-                    break
+            if not handler:
+                self.on_not_found( env, read, write )
+                return
 
-        if not handler:
-            self.on_not_found( env, read, write )
-            return
+            handler( env, read, write )
 
-        handler( env, read, write )
+        def _log_error( self, error ):
+            print error
 
-    def _log_error( self, error ):
-        print error
+    def __call__( self, env ):
+        print ('call env: %s' % (self.path,))
+        value = env
+        for part in self.path:
+            value = value[ part ]
+        print ('value: %s' % value )
+        return value
+
+    def __init__( self, path=None, name=None ):
+        if path is None:
+            self.path = []
+        else:
+            self.path = list(path)
+            self.path.append( name )
+
+    def __getitem__( self, name ):
+        return _Env( self.path, name )
+
+    def set( self, updater, handler ):
+        return env.Setter( self.path, updater, handler )
+
+    class Setter:
+        def __init__( self, path, updater, handler ):
+            self.path = path
+            self.updater = updater
+            self.handler = handler
+
+        def __call__( self, env, r, w ):
+            env_to_update = env
+            for part in self.path[:-1]:
+                env_to_update = env_to_update[ part ]
+            
+            env_to_update[ self.path[-1] ] = self.updater( env )
+            self.handler( env, r, w )
+    
+
+env = _Env()
+
 
 class RPCRouter:
 
@@ -545,6 +585,7 @@ class Connection:
         print "incoming request"
 
 
+
 class Socket:
     def __init__( self, address ):
         self.address = address
@@ -585,6 +626,16 @@ class Socket:
                 os.remove( self.host )
             except OSError:
                 pass
+
+
+
+class wsgi:
+    class Server:
+        def __init__( self, handler ):
+            self.handler = handler
+
+        def __call__( self, env, read, write ):
+            write('wsgi stub at %s' % env['http']['path'] )
 
 
 """
@@ -683,16 +734,22 @@ def _404( env, read, write ):
 def _500( env, read, write ):
     write( '<html><body>500 - Internal server error </body></html>' )
 
+def wsgi_app( self, environ, start_response ):
+    pass
 
 server = Listen\
     ( Socket( 'tcp://localhost:%s' % port)
     , transport.HTTP\
-        ( EnvRouter\
+        ( env.Router\
             ( ( '/', hellohttp )
-               , ( regex('^\/other(?P<path>(\/.*|))$')
-               , otherhello
-               )
-            , by=lambda env: env['http']['path']
+                # usefull for proxying and stuff ;)
+            , ( regex('^\/wsgiapp(?P<url>([\/\?].*|))$')
+              , env['http']['path'].set\
+                    ( env['route']['url']
+                    , wsgi.Server( wsgi_app )
+                    )
+              )
+            , by=env['http']['path']
             , on_not_found=_404
             )
         , on_handler_fail=_500
