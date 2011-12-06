@@ -8,13 +8,14 @@ counteracting DRY.
 
 WSGI really should be only a handler ontop of a HTTP transport.
 
-The idea goes as followes: find an wsgi-ish way to bubble a 'request' from the
-very bottom ( the listener ) all the way up to some handler ( which could be
-a html page, or an amqp subscriber/publisher ).
+The idea goes as followes: find an wsgi-ish way to bubble a connection
+( which eventually might become a request) from the very bottom ( the listener )
+all the way up to some handler ( which could be a html page, or an amqp
+subscriber/publisher ).
 
-Every transport receives (socket, env) per connection as arguments and delivers
-a read and write method to its handler while populating env with transport-
-specific stuff.
+Every transport receives ( env, socket ) per connection as arguments and
+passes a read and write method to its handler while populating env with
+transport-specific stuff.
 
 read is a callable which returns a list or generator, write is a callable,
 receiving one argument.
@@ -34,6 +35,7 @@ from gevent import socket
 from gevent.pywsgi import _BAD_REQUEST_RESPONSE, format_date_time
 
 import re, os, time
+regex = re.compile
 
 from mimetools import Message
 
@@ -41,8 +43,9 @@ from StringIO import StringIO
 
 
 
-port = 8080
-class MISSING:
+port = 8081
+
+class Undefined:
     pass
 
 def deepcopydict(org):
@@ -60,13 +63,13 @@ def deepcopydict(org):
 
 class Call:
     
-    def __init__( self, resource, includeEnv=False ):
+    def __init__( self, resource, include_env=False ):
         self.resource = resource
-        self.includeEnv = includeEnv
+        self.include_env = include_env
 
-    def __call__( self, read, write, env ):
+    def __call__( self, env, read, write ):
         for (args, kwargs) in read():
-            if self.includeEnv:
+            if self.include_env:
                 args = list(args)
                 args.insert( 0, env )
                 
@@ -76,30 +79,53 @@ class Call:
 
 class EnvRouter:
 
-    def __init__( self, *handler, **params ):
-        self.handler = {}
-        handler = list(handler)
-        lastValue = handler.pop(0)
+    def __init__( self, *handlers, **params ):
+        self.handler = []
+        self.named_routes = {}
+
+        routes = set()
         
-        i = 0
-        while handler:
-            value = handler.pop(0)
-            if i%2 == 0:
-                self.handler[ lastValue ] = value
+        for i in range( len(handlers) ):
+            (key, handler) = handlers[i]
+            if key in routes:
+                raise SyntaxError( 'Routes must be unique' )
 
-            lastValue = value
-            i+=1
+            routes.add( key )
+            if not hasattr( key, 'match' ) :
+                self.named_routes[ key ] = handler
+            else:
+                self.handler.append( (key, handler ) )
 
-        self.by = params['by']
-        self.on_not_found = params.get('on_not_found', lambda read, write, env: self._log_error( 'route not found .. env: %s' % (env,) ) )
+        self.by = params.pop('by')
+        self.on_not_found = params.pop\
+            ( 'on_not_found'
+            , lambda env, read, write: self._log_error( 'route not found .. env: %s' % (env,) )
+            )
 
-    def __call__( self, read, write, env ):
-        handler = self.handler.get( self.by( env ), None )
+        if params:
+            raise SyntaxError( 'Invalid keyword arguments: %s' % params.keys()  )
+
+    def __call__( self, env, read, write ):
+        value = self.by( env )
+        handler = self.named_routes.get( value, None )
+        env['route'] = {'path': value }
+
         if not handler:
-            self.on_not_found( read, write, env )
+            for (key,handler_) in self.handler:
+                match = key.match( value )
+                if match:
+                    groups = match.groupdict()
+                    if groups:
+                        env['route'].update( groups )
+                        
+                    handler = handler_
+                    break
+
+        if not handler:
+            self.on_not_found( env, read, write )
             return
 
-        self.handler[ self.by( env ) ]( read, write, env )
+        handler( env, read, write )
 
     def _log_error( self, error ):
         print error
@@ -120,7 +146,7 @@ class RPCRouter:
             lastValue = value
             i+=1
 
-    def __call__( self, read, write, env ):
+    def __call__( self, env, read, write ):
         for data in read():
             args, kwargs = data
             args = list(args)
@@ -132,77 +158,18 @@ class RPCRouter:
             else:
                 env['rpc']['path'] = path
 
-            self.handler[ path ]( lambda: (( args, kwargs ),), write, env  )
+            self.handler[ path ]( env, lambda: (( args, kwargs ),), write  )
 
 
 
-class LocalSocket:
-
-    def __init__( self, handler ):
-        self.handler = handler
-
-    def __call__( self ):
-        return _LocalSocket( self.handler )
-
-
-class _LocalSocket:
-    """ test handlers locally """
-    #TODO: use actual buffers instead of queues
-
-    class _LocalServerSocket:
-        pass
-
-    def __init__( self, handler ):
-        self.env = { 'socket': self }
-
-        serverSocket = self._LocalServerSocket()
-
-        self.clientqueue = clientqueue = Queue()
-        self.serverqueue = serverqueue = Queue()
-
-        self.read = self.readline = lambda: serverqueue
-        self.write = lambda data: clientqueue.put( data )
-
-        serverSocket.read = serverSocket.readline = lambda: clientqueue
-        serverSocket.write = lambda data: serverqueue.put( data )
-
-        spawn( handler, serverSocket, self.env  )
-
-    def __iter__( self ):
-        return self.serverqueue
-
-    def release( self ):
-        self.clientqueue.put( StopIteration )
-        self.serverqueue.put( StopIteration )
-        self.env = { 'socket': self }
 
 def spawnme( function ):
     f = ( function, )
     return lambda *args, **kwargs: spawn( *f+args, **kwargs )
 
-class ClientDummy:
-
-    def __call__( self, socket, env ):
-        self._readservermessages( socket, env )
-
-        for request in env['client'].input_queue:
-            socket.write( request )
-
-    @spawnme
-    def _readservermessages( self, socket, env ):
-        for response in socket.read():
-            env['client'].output_queue.put( response )
 
 
 class transport:
-
-    class Dummy:
-
-        def __init__( self, handler ):
-            self.handler = handler
-
-        def __call__( self, socket, env ):
-            self.handler( socket.__iter__(), socket.write, env )
 
 
     class Line:
@@ -210,7 +177,7 @@ class transport:
         def __init__( self, handler ):
             self.handler = handler
 
-        def __call__( self, socket, env ):
+        def __call__( self, env, socket ):
             self.handler\
                 ( lambda: self._readlines( socket )
                 , lambda data: socket.write( data+'\r\n' )
@@ -229,7 +196,7 @@ class transport:
             self.force_chunked = force_chunked
             self.on_handler_fail = on_handler_fail
 
-        def __call__( self, socket, env ):
+        def __call__( self, env, socket ):
             env.setdefault( 'http', {} )
 
             ## no need to copy w/o pipelining
@@ -261,7 +228,7 @@ class transport:
                 if not header:
                     return
 
-                elif not self._read_request_header( socket, env_http, header ):
+                elif not self._read_request_header( env_http, socket, header ):
                     socket.write( _BAD_REQUEST_RESPONSE )
                     env_http['status'] = 400
                     abort = True
@@ -270,10 +237,10 @@ class transport:
 
             has_error = False
             if not abort:
-                env_http['_read'] = read = lambda: self._read( socket, env_http )
-                env_http['_write'] = write = lambda data: self._write( data, socket, env_http )
+                env_http['_read'] = read = lambda: self._read( env_http, socket )
+                env_http['_write'] = write = lambda data: self._write( env_http, socket, data )
                 try:
-                    self.handler( read, write, env )
+                    self.handler( env, read, write )
                 except:
                     has_error = True
                     env_http['keepalive'] = False
@@ -281,30 +248,33 @@ class transport:
                     
                     if self.on_handler_fail:
                         try:
-                            self.on_handler_fail( read, write, env )
+                            self.on_handler_fail( env, read, write )
                         except:
                             pass
 
             else:
                 env_http['keepalive'] = False
 
-            self._finish_response( socket, env )
+            self._finish_response( env, socket )
             if has_error:
                 raise
 
-        def _finish_response( self, socket, env ):
+        def _finish_response( self, env, socket ):
             env_http = env['http']
             env_http['is_handler_done'] = True
             if not env_http['is_header_send']:
-                self._write_nonchunked_response( socket, env_http )
+                self._write_nonchunked_response( env_http, socket )
             else:
                 socket.write(  "0\r\n\r\n"  )
 
             if env_http['keepalive']:
-                self( socket, env )
+                self( env, socket )
 
 
-        def _write( self, data, socket, env ):
+        def _write( self, env, socket, data ):
+            if not isinstance( data, basestring ):
+                raise Exception('Received non-text response: %s' % data )
+
             if not env['is_header_send']:
                 if env['mode'] == 'response' and not env['force_chunked']:
                     # more than 1 write = chunked response
@@ -314,19 +284,19 @@ class transport:
                         env['result_on_hold'] = data
                         return
 
-                    self._send_headers( socket, env )
+                    self._send_headers( env, socket )
 
                     lastresult = env.pop('result_on_hold')
                     socket.write(  "%x\r\n%s\r\n" % (len(lastresult), lastresult) )
                 else:
-                    self._send_headers( socket, env )
+                    self._send_headers( env, socket )
 
             socket.write(  "%x\r\n%s\r\n" % (len(data), data) )
 
-        def _read( self, socket, env ):
+        def _read( self, env, socket ):
             if not env['is_header_read']:
                 header = socket.readline( )
-                self._read_response_header( header, env )
+                self._read_response_header( env, header )
                 env['is_header_read'] = True
 
             if not env['content_length']:
@@ -350,7 +320,7 @@ class transport:
         def _log_error( self, err, raw_requestline=''):
             print( 'ERROR: %s' % (err % (raw_requestline,) ) )
 
-        def _read_request_header(self, socket, env, raw_requestline):
+        def _read_request_header(self, env, socket, raw_requestline):
 
             requestline = raw_requestline.rstrip()
             words = requestline.split()
@@ -416,7 +386,7 @@ class transport:
 
             return True
 
-        def _serialize_headers( self, socket, env):
+        def _serialize_headers( self, env, socket):
             keepalive = env.get('keepalive', None)
 
             response_headers =\
@@ -451,38 +421,20 @@ class transport:
                 
             return ''.join(towrite)
 
-        def _send_headers( self, socket, env ):
-            socket.write( '%s\r\n' % self._serialize_headers( socket, env ) )
+        def _send_headers( self, env, socket ):
+            socket.write( '%s\r\n' % self._serialize_headers( env, socket ) )
             env['is_header_send'] = True
             
-        def _write_nonchunked_response( self, socket, env ):
+        def _write_nonchunked_response( self, env, socket ):
             content = env.pop('result_on_hold','' )
-            has_error = False
-            has_error_handler_error = False
             
-            if not isinstance( content, basestring ):
-                env['keepalive'] = False
-                env['status'] = 500
-
-                try:
-                    self.on_handler_fail( env['_read'], env['_write'], env )
-                except:
-                    has_error_handler_error = True
-                has_error = True
-
             env['response']['header'].append(('Content-Length', str(len(content))))
             response = "%s\r\n%s"\
-                %   ( self._serialize_headers( socket, env )
+                %   ( self._serialize_headers( env, socket )
                     , content
                     )
 
             socket.write ( response )
-
-            if has_error_handler_error:
-                raise
-            if has_error:
-                raise Exception('Received non-text response: %s' % content )
-
 
 class IOQueue:
 
@@ -531,6 +483,7 @@ class ConnectionPool:
 def Listen( *args, **kwargs):
     l = _Listen( *args, **kwargs )
     l.start()
+    return l
 
 class _Listen:
     def __init__( self, socket, handler, create_env=None ):
@@ -542,9 +495,10 @@ class _Listen:
 
     def start( self ):
         self.connected = True
-
         for (connection,address) in self.socket.accept():
             spawn( self._handle_connection, connection, address )
+        print "stopped"
+        self.connected = False
 
     def _handle_connection( self, connection, address ):
         env = self.create_env()
@@ -552,16 +506,15 @@ class _Listen:
             ( remoteclient = { 'address':address }
             , socket = connection
             )
-        self.handler( connection, env )
+        self.handler( env, connection )
         connection.close()
             
     def stop( self ):
-        self.connected = False
         self.socket.close()
 
 
-re_host_tcp = re.compile(r'^(tcp):\/\/([a-z\.]+|([0-9]+\.){3}[0-9]+):([0-9]+)$',re.I)
-re_host_ipc = re.compile(r'^(ipc):\/\/(.*)$',re.I)
+re_host_tcp = regex(r'^(tcp):\/\/([a-z\.]+|([0-9]+\.){3}[0-9]+):([0-9]+)$',re.I)
+re_host_ipc = regex(r'^(ipc):\/\/(.*)$',re.I)
 
 def parseSocketAddress( address ):
     port = None
@@ -636,9 +589,9 @@ class Socket:
 
 """
 
-class protocol:
+class jsonrpc:
 
-    class JsonRPC:
+    class Client:
 
         def __init__( self, handler ):
             self.handler = handler
@@ -695,12 +648,12 @@ class protocol:
             self.socket.write( data )
 """
 
-def echo_handler( arg ):
-    seconds = 0 #random.randint( 0, 2 )
+def echo_handler( env, arg ):
+    # seconds = random.randint( 0, 2 )
     #sleep( seconds )
-    return "echo after %s seconds: %s" % ( seconds, arg)
+    return "echo %s from path %s" % ( arg, env['route']['path'] )
 
-def hellohttp( read, write, env ):
+def hellohttp( env, read, write ):
     body = ()
     if env['http']['method'] == 'POST':
         posted = ''.join( read() )
@@ -712,19 +665,22 @@ def hellohttp( read, write, env ):
               )
             )
 
-    raise Exception( 'testexception' )
     write\
         ( '<html><header></header><body>%s</body></html>'\
             % body
         )
 
-def _404( read, write, env ):
+def otherhello( env, read, write ):
+    write\
+        ( '<html><header></header><body>%s</body></html>'\
+            % ('route: %s' % ( env['route'],)  )
+        )
+
+def _404( env, read, write ):
     env['http']['status'] = 404
     write( '<html><body>404 - Not found</body></html>' )
 
-def _500( read, write, env ):
-    raise Exception( 'testexception' )
-    env['http']['status'] = 500
+def _500( env, read, write ):
     write( '<html><body>500 - Internal server error </body></html>' )
 
 
@@ -732,7 +688,10 @@ server = Listen\
     ( Socket( 'tcp://localhost:%s' % port)
     , transport.HTTP\
         ( EnvRouter\
-            ( '/', hellohttp
+            ( ( '/', hellohttp )
+               , ( regex('^\/other(?P<path>(\/.*|))$')
+               , otherhello
+               )
             , by=lambda env: env['http']['path']
             , on_not_found=_404
             )
@@ -742,7 +701,7 @@ server = Listen\
 
 #client = ConnectionPool\
 #    ( Socket( 'ipc://testsocket' )
-#    , transport.HTTP( http.Client() )
+#    , transport.HTTP( IOClient() )
 #    )
 
 
@@ -766,61 +725,3 @@ def starttest():
 """
 
 
-"""
-
-class jsonrpc:
-
-    class Server:
-
-        def __init__( self, handler ):
-            self.handler = handler
-
-        def __call__( self, read, write, env ):
-            for request in read:
-                
-                ( data
-                , requestID
-                , version
-                , isBatch ) = JsonRPC.decodeRequest( request )
-
-                env.rpc.requestID = requestID
-                
-                self.handler\
-                    ( isBatch and ( data, ) or data
-                    , lambda: write( JsonRPC.encodeResult( data, requestID, version ) )
-                    , env )
-
-
-
-    class Client:
-        _ID = 0
-
-        def __call__( self, read, write, env ):
-            requestID = self._.ID
-
-            for (path, args, kwargs) in env.socket:
-                write( JsonRPC.encodeRequest\
-                        ( (path, args, kwargs), requestID ) )
-
-            self.__class__._ID += 1
-
-        def read( self ):
-            (response,self.env_rpc.version) = JSONRPCHandler.decodeResult\
-                ( self.socket.read( ) )
-                    
-            return response
-
-        def write( self, data ):
-            args = data.pop(0,())
-            kwargs = data.pop(0,{})
-
-            content  = JSONRPCHandler.encodeBody\
-                    ( self.env_rpc.path, args, kwargs, self.env_rpc.version )
-        
-            self.socket.write( data )
-
-
-
-
-
-"""
