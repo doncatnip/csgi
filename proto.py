@@ -127,7 +127,7 @@ class _Env:
                 return
 
             if self.each:
-                env['router']['hander'] = handler
+                env['route']['hander'] = handler
                 self.each( env, read, write )
             else:
                 handler( env, read, write )
@@ -135,21 +135,21 @@ class _Env:
         def _log_error( self, error ):
             log.error( error )
 
-    def __call__( self, env, *args ):
+    def __call__( self, *args ):
+        env = args[0]
         value = env
         for part in self.path:
             value = value[ part ]
-        if args:
-            return value( (env,)+args )
+        if callable( value ):
+            return value( *args )
         else:
             return value
 
     def __init__( self, path=None, name=None ):
         if path is None:
-            self.path = []
+            self.path = ()
         else:
-            self.path = list(path)
-            self.path.append( name )
+            self.path = path+(name,)
 
     def __getitem__( self, name ):
         return _Env( self.path, name )
@@ -422,7 +422,7 @@ class transport:
                 , path=path
                 )
 
-            log.debug(headers.items())
+            log.debug("%s\n%s" % (headers.items(), env))
             env['request']['header'] = headers
 
             return True
@@ -589,7 +589,7 @@ class Connection:
         self.write = gsocket.sendall
         self.close = gsocket.close
     
-        log.debug("incoming request")
+        log.debug("incoming connection")
 
 
 
@@ -653,7 +653,7 @@ class jsonrpc:
         def __init__( self, handler ):
             self.handler = handler
 
-        def __call__( self, read, write, env ):
+        def __call__( self, env, read, write ):
             env['rpc'] = {'type': 'jsonrpc'}
 
             for request in read():
@@ -691,7 +691,7 @@ class jsonrpc:
                                   }
                                 )
 
-                        self.handler( env, (args,kwargs,), jsonwrite )
+                        self.handler( env, lambda: ((args,kwargs),), jsonwrite )
 
                     write( parser.encodeResponse( response ) )
                 else:
@@ -707,9 +707,11 @@ class jsonrpc:
                         kwargs = {}
                         args = params
 
+                    print ('%s,%s' % (args, kwargs))
+
                     self.handler\
                         ( env
-                        , (args,kwargs)
+                        , lambda: ((args,kwargs),)
                         , lambda result: write\
                             ( parser.encodeResponse\
                                 ( { 'id': data['id']

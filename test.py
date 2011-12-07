@@ -75,7 +75,7 @@ config['server'] = server = Listener\
                     , wsgi.Server( resource.http.WsgiApp )
                     )
               )
-            , ( '/service', jsonrpc.Server\
+            , ( '/service/jsonrpc', jsonrpc.Server\
                     ( env.Router\
                         ( ( 'service.echo', resource.EchoHandler.echo )
                         , by=env['rpc']['path']
@@ -107,7 +107,7 @@ config['server'] = server = Listener\
 def terminate( signal, frame ):
     server.stop()
 
-
+"""
 daemon = DaemonContext\
     ( files_preserve=[handler.stream]
     , pidfile=pidfile
@@ -116,5 +116,6 @@ daemon = DaemonContext\
 with daemon:
     gevent.reinit()
     gevent.signal(signal.SIGTERM, terminate, signal.SIGTERM, None )
-    server.start()
+    """
+server.start()
 

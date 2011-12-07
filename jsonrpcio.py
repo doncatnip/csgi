@@ -145,7 +145,7 @@ class Parser:
             for parser in PARSERS:
                 log.debug("trying %s" % parser.version)
                 try:
-                    result = parser.decodeRequest\
+                    (success,result,isBatch) = parser.decodeRequest\
                         ( parsed
                         , errorConstructor
                         , extra
