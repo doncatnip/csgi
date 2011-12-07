@@ -634,13 +634,14 @@ class jsonrpc:
 
     class Server:
 
-        def __init__( self, handler, on_handler_fail=None ):
+        def __init__( self, handler, on_handler_fail=None, loads=None, dumps=None ):
             self.handler = handler
             self._nowrite = lambda data: None
             if not on_handler_fail:
                 on_handler_fail = jsonrpc.on_handler_fail
                 
             self.on_handler_fail = on_handler_fail
+            self.parser = jsonrpcio.Parser( loads=loads, dumps=dumps )
 
         def __call__( self, env, read, write ):
             env['rpc'] = {'type': 'jsonrpc'}
@@ -649,7 +650,8 @@ class jsonrpc:
                 ( success
                 , data
                 , parser
-                , isBatch ) = jsonrpcio.decodeRequest( request )
+                , isBatch
+                ) = self.parser.decodeRequest( request )
 
                 env['rpc']['isBatch'] = isBatch
                 
@@ -657,28 +659,11 @@ class jsonrpc:
                     write( data )
                     continue
                 
-                if env['rpc']['isBatch']:
-                    response = []
-                    
-                    for (success, data) in data:
-                        if not success:
-                            response.append( data )
-                            continue
-                            
+                if isBatch:
+                    for (partial, writeback) in data:
+                        self._call_handler( env, partial, writeback, parser )
 
-                        if data['id'] is not None:
-                            jsonwrite = lambda result: response.append\
-                                ( { 'id':data['id']
-                                  , 'result': result
-                                  }
-                                )
-                        else:
-                            jsonwrite = self._nowrite
-
-                        self._call_handler( env, data, jsonwrite )
-
-
-                    write( parser.encodeResponse( response ) )
+                    write( data.encode() )
                 else:
                     if data['id'] is not None:
                         jsonwrite =\

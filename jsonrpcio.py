@@ -117,12 +117,23 @@ def datetime_decoder(d):
 
 
 class Parser:
+    version = None
 
-    @classmethod
+    def __init__( self, loads=None, dumps=None, errorConstructor=defaultErrorConstructor ):
+        if not loads:
+            loads = lambda text: json.loads(text, object_hook=datetime_decoder)
+        if not dumps:
+            dumps = lambda obj: json.dumps(obj, cls=JSONDateTimeEncoder)
+
+        self.errorConstructor = errorConstructor
+        self.loads = loads
+        self.dumps = dumps
+        if self.version is None:
+            self.parsers = tuple( _Version( loads, dumps, errorConstructor ) for _Version in PARSERS )
+
     def decodeRequest\
-            ( klass
+            ( self
             , body
-            , errorConstructor=defaultErrorConstructor
             , extra=None
             ):
 
@@ -132,17 +143,18 @@ class Parser:
             extra = {}
 
         success = True
+        parser = self.parsers[0]
+
         try:
-            parsed = klass.decode( body )
+            parsed = self.decode( body )
         except JSONRPCProtocol_Error as e:
             protocolError = e
         else:
-            for parser in PARSERS:
+            for parser in self.parsers:
                 log.debug("trying %s" % parser.version)
                 try:
                     (success,result,isBatch) = parser.decodeRequest\
                         ( parsed
-                        , errorConstructor
                         , extra
                         )
                     protocolError = Undefined
@@ -152,82 +164,66 @@ class Parser:
                     log.debug('protocol error (%s) , trying next ...' % e.message)
                     protocolError = e
                 except Exception as e:
+                    log.exception( 'Could not decode request' )
                     protocolError = JSONRPCProtocol_UnexpectedError()
                     break
 
         if protocolError is not Undefined:
-            parser = parser or PARSERS[0]
             success = False
             result =  parser.encodeError\
                 ( protocolError
-                , errorConstructor
                 )
 
-        return ( success, result, parser, False )
+        return ( success, result, parser, isBatch )
 
-    @classmethod
-    def encode( klass, response ):
+    def encode( self, response ):
         try:
-            return json.dumps(response, cls=JSONDateTimeEncoder)
+            return self.dumps( response )
         except (TypeError,ValueError):
             raise JSONRPCProtocol_EncodeError()
 
-    @classmethod
-    def decode( klass, body ):
+    def decode( self, body ):
         try:
-            return json.loads(body, object_hook=datetime_decoder)
+            return self.loads( body )
         except (TypeError,ValueError):
             raise JSONRPCProtocol_DecodeError( )
 
-
-decodeRequest = Parser.decodeRequest
 
 class _1_0(Parser):
 
     version = JSONRPC_VERSION_1_0
 
-    @classmethod
-    def encodeError( klass, exceptionObj, errorConstructor=defaultErrorConstructor, **requestInfo ):
+    def encodeError( self, exceptionObj, **requestInfo ):
         if not isinstance( exceptionObj, JSONRPC_BaseError ):
             exception = exceptionObj
             exceptionObj = JSONRPCApplication_UnexpectedError()
             exceptionObj.exception = exception
 
-        exceptionObj.version = klass.version
-        requestID = requestInfo.get( 'requestID', Undefined )
+        exceptionObj.version = self.version
+        requestID = requestInfo.pop( 'requestID', None )
 
         try:
-            return klass.doEncodeError\
-                ( requestID, *errorConstructor( exceptionObj ) )
+            return self.doEncodeError\
+                ( requestID, *self.errorConstructor( exceptionObj ), **requestInfo )
         except JSONRPCProtocol_EncodeError as e:
-            return klass.doEncodeError\
-                ( requestID, *errorConstructor( e ) )
+            return self.doEncodeError\
+                ( requestID, *self.errorConstructor( e ), **requestInfo )
 
-
-
-
-    @classmethod
-    def doEncodeError( klass, requestID, code, message, extra=None  ):
-        if requestID is Undefined:
-            requestID = None
-
+    def doEncodeError( self, requestID, code, message, extra=None  ):
         error = {'code':code, 'message':message }
         if isinstance(extra,dict):
             error['error'] = extra
-        return klass.encode( {'result':None, 'id':requestID, 'error': error } )
+        return self.encode( {'result':None, 'id':requestID, 'error': error } )
 
-    @classmethod
-    def doEncodeResponse( klass, result ):
+    def doEncodeResponse( self, result ):
         requestID = result.get('id',None)
         if requestID is None: # is a notification
             return None
-        return klass.encode( {'result':result['result'],'id':requestID, 'error': None } )
+        return self.encode( {'result':result['result'],'id':requestID, 'error': None } )
 
-    @classmethod
     def decodeRequest\
-            ( klass
+            ( self
             , parsed
-            , errorConstructor
             , extra
             ):
 
@@ -237,7 +233,7 @@ class _1_0(Parser):
                 )
 
         parsed = dict(parsed)
-        requestID = parsed.pop('id', Undefined)
+        requestID = parsed.pop('id', None)
         method = parsed.pop('method', Undefined)
         params = parsed.pop('params', Undefined)
 
@@ -254,155 +250,178 @@ class _1_0(Parser):
         # from now on we can be sure its a 1.0 request
         # so render everything as 1.0 response ( no raise )
 
+        error = None
         if not isinstance( method, basestring ):
-            return\
-                ( False
-                , klass.encodeError\
-                    ( JSONRPCProtocol_ParseError\
-                        ( "'method' must be a String"
-                        )
-                    , errorConstructor
-                    , requestID=requestID
-                    )
-                , False
-                )
+            error = JSONRPCProtocol_ParseError\
+                ( "'method' must be a String", requestID=requestID )
 
         if not isinstance( params, list ):
-            return\
-                ( False
-                , klass.encodeError\
-                    ( JSONRPCProtocol_ParseError\
-                        ( "'params' must be an Array"
-                        )
-                    , errorConstructor
-                    , requestID=requestID
-                    )
-                )
+            error = JSONRPCProtocol_ParseError\
+                ( "'params' must be an Array", requestID=requestID )
+
         result =\
             { 'method': method
             , 'params': params
-            , 'version': klass.version
+            , 'version': self.version
+            , 'id': requestID
             }
-        if requestID is not Undefined:
-            result['id'] = requestID
 
         return\
-            ( True
+            ( not error
             , result
             , False
             )
 
-    @classmethod
-    def encodeResponse( klass, result, errorConstructor=None ):
+    def encodeResponse( self, result ):
         try:
-            return klass.doEncodeResponse( result )
+            return self.doEncodeResponse( result )
         except JSONRPCProtocol_EncodeError as e:
-            return klass.encodeError\
+            return self.encodeError\
                 ( e
-                , errorConstructor
-                , requestID=result.get( 'id',Undefined )
+                , requestID=result.get( 'id',None )
                 )
-
 
 
 
 class _2_0(_1_0):
     version = JSONRPC_VERSION_2_0
 
-    @classmethod
-    def doEncodeError( klass, requestID, code, message, extra=None  ):
-        if requestID is Undefined:
-            requestID = None
+    class BatchResponse:
+        _no_response = lambda data: None
 
+        def __init__( self, request, parser, extra ):
+            self.request = request
+            self.response = []
+            self.parser = parser
+            self.extra = extra
+
+        def __iter__( self ):
+
+            for request in self.request:
+                try:
+                    (success,partial,waste) = self.parser.decodeRequest\
+                        ( request, self.extra, True )
+
+                except JSONRPC_BaseError as e:
+                    self.response.append( self.parser.encodeError\
+                            ( e, requestID=request.get('id'), isBatch=True ) )
+                    continue
+
+                requestID = partial.get('id',None)
+                if requestID is None:
+                    writeback = self._no_response
+                else:
+                    writeback = lambda data: self.response.append\
+                        ( { 'id': request['id']
+                          , 'result': data
+                          , 'jsonrpc': self.parser.version
+                          }
+                        )
+
+                yield (partial, writeback)
+
+        def encode( self ):
+            encoded = self.parser.encode( self.response )
+            return encoded
+
+    def doEncodeError( self, requestID, code, message, extra=None, isBatch=False  ):
         error = {'code':code, 'message':message }
 
         if isinstance(extra,dict):
             error['data'] = extra
 
-        return klass.encode( {'id':requestID, 'error': error, 'jsonrpc': klass.version } )
+        error = {'id':requestID, 'error': error, 'jsonrpc': self.version }
+        if isBatch:
+            return error
 
-    @classmethod
-    def doEncodeResponse( klass, result ):
+        return self.encode( error )
+
+    def doEncodeResponse( self, result ):
         requestID = result.get('id',None)
         if requestID is None:
             return None
 
-        return klass.encode(  {'id': result['id'], 'result':result['result'], 'jsonrpc': klass.version } )
+        return self.encode(  {'id': requestID, 'result':result['result'], 'jsonrpc': self.version } )
  
-    @classmethod
     def decodeRequest\
-            ( klass
+            ( self
             , parsed
-            , errorConstructor
             , extra
+            , isBatch=False
             ):
 
+        success = True
         if isinstance( parsed, list ):
-            raise JSONRPCProtocol_FeatureNotSupported\
-                ( "Batched requests are not supported yet"
-                )
-
-        if not isinstance( parsed, dict ):
-            raise JSONRPCProtocol_ParseError\
-                ( "JSON root must be an Object"
-                )
-
-        parsed = dict(parsed)
-
-        requestID = parsed.pop('id', Undefined)
-        version = parsed.pop('jsonrpc', Undefined)
-        method = parsed.pop('method', Undefined)
-        params = parsed.pop('params', Undefined)
-
-        if Undefined in ( method, params, version ):
-            raise JSONRPCProtocol_ParseError\
-                ( "Members 'jsonrpc', 'method' and 'params' are required"
-                )
-
-        if parsed:
-            raise JSONRPCProtocol_ParseError\
-                ( "Too many fields received"
-                )
-
-        if version != klass.version:
-            raise JSONRPCProtocol_UnknownVersion\
-                ( "Invalid JSON-RPC Version specified"
-                , extra={'version':version}
-                )
-
-        # from now on we can be sure its a 2.0 request
-        # so render everything as 2.0 response ( no raise )
-
-        if not isinstance( method, basestring ):
-            return klass.encodeError\
-                ( JSONRPCProtocol_ParseError\
-                    ( "'method' must be a String"
+            if isBatch:
+                raise JSONRPCProtocol_ParseError\
+                    ( "JSON request must be an Object"
                     )
-                , errorConstructor
-                , requestID=requestID
-                )
+            else:
+                isBatch = True
+                result = self.BatchResponse( parsed, self, extra )
 
-        if not isinstance( params, (list,dict) ):
-            return klass.encodeError\
-                ( JSONRPCProtocol_ParseError\
-                    ( "'params' must be an array or dict"
+        elif not isinstance( parsed, dict ):
+            raise JSONRPCProtocol_ParseError\
+                ( "JSON request must be an Object"
+                )
+        else:
+            parsed = dict(parsed)
+
+            requestID = parsed.pop('id', None)
+            version = parsed.pop('jsonrpc', Undefined)
+            method = parsed.pop('method', Undefined)
+            params = parsed.pop('params', Undefined)
+
+            if Undefined in ( method, params, version ):
+                raise JSONRPCProtocol_ParseError\
+                    ( "Members 'jsonrpc', 'method' and 'params' are required"
                     )
-                , errorConstructor
-                , requestID=requestID
-                )
 
-        result =\
-            { 'method': method
-            , 'params': params
-            , 'version': klass.version
-            }
-        if requestID is not Undefined:
-            result['id'] = requestID
+            if parsed:
+                raise JSONRPCProtocol_ParseError\
+                    ( "Too many fields received"
+                    )
+
+            if version != self.version:
+                raise JSONRPCProtocol_UnknownVersion\
+                    ( "Invalid JSON-RPC Version specified"
+                    , extra={'version':version}
+                    )
+
+            # from now on we can be sure its a 2.0 request
+            # so render everything as 2.0 response ( no raise )
+
+            error = None
+            if not isinstance( method, basestring ):
+                error = JSONRPCProtocol_ParseError\
+                    ( "'method' must be a String"  )
+
+            
+            if not isinstance( params, (list,dict) ):
+                error = JSONRPCProtocol_ParseError\
+                    ( "'params' must be an array or dict" )
+
+            if error:
+                if not isBatch:
+                    success = False
+                    result = self.encodeError\
+                        ( error
+                        , requestID=requestID
+                        )
+                else:
+                    raise error
+
+            result =\
+                { 'method': method
+                , 'params': params
+                , 'version': self.version
+                , 'id': requestID
+                }
 
         return\
-            ( True
+            ( success
             , result
-            , False
+            , isBatch
             )
 
 PARSERS = \

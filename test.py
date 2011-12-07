@@ -58,9 +58,14 @@ import testresource
 config = {'some':'config'}
 config['resource'] = resource = LazyResource( testresource, config )
 
-#config['client'] = ConnectionPool\
-#    ( Socket( 'ipc://testsocket' )
-#    , transport.HTTP( IOClient() )
+#config['workerclient'] = ConnectionPool\
+#    ( Socket( 'ipc://worker.sock' )
+#    , transport.Line( jsonrpc.Client() )
+#    )
+
+#config['worker'] = workserver = Listener\
+#    ( Socket( 'ipc://worker.sock' )
+#    , transport.Line( jsonrpc.Server( resource.Worker ) )
 #    )
 
 config['server'] = server = Listener\
@@ -68,19 +73,21 @@ config['server'] = server = Listener\
     , transport.HTTP\
         ( env.Router\
             ( ( '/', resource.http.Hello )
-                # usefull for proxying and stuff ;)
-            , ( re.compile('^\/wsgiapp(?P<url>([\/\?].*|))$')
-              , env['http']['path'].set\
-                    ( env['route']['url']
-                    , wsgi.Server( resource.http.WsgiApp )
-                    )
+            , ( re.compile('^(?P<approot>\/wsgiapp1).*$')
+              , wsgi.Server( resource.http.WsgiApp )
               )
-            , ( '/service/jsonrpc', jsonrpc.Server\
-                    ( env.Router\
-                        ( ( 'service.echo', resource.EchoHandler.echo )
-                        , by=env['rpc']['path']
-                        , each=Call( env['route']['hander'] )
+            , ( '/service/jsonrpc', env.Router\
+                    ( ( 'POST', jsonrpc.Server\
+                        ( env.Router\
+                            ( ( 'service.echo', resource.EchoHandler.echo )
+                            , ( 'other.echo', resource.EchoHandler.echo )
+                            , by=env['rpc']['path']
+                            , each=Call( env['route']['hander'] )
+                            )
                         )
+                      )
+                    , by=env['http']['method']
+                    , on_not_found=resource.http._404
                     )
               )
            #  , '/pubsub', socketIO.Server\
@@ -117,5 +124,7 @@ with daemon:
     gevent.reinit()
     gevent.signal(signal.SIGTERM, terminate, signal.SIGTERM, None )
     """
+#Farm( server, workserver ).start()
+
 server.start()
 
