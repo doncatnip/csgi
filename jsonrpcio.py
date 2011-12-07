@@ -13,11 +13,6 @@ JSONRPC_VERSION_2_0 = "2.0"     # http://groups.google.com/group/json-rpc/web/js
 class Undefined:
     pass
 
-class Unknown:
-    pass
-
-
-
 
 
 class JSONRPC_BaseError( BaseException ):
@@ -163,7 +158,7 @@ class Parser:
         if protocolError is not Undefined:
             parser = parser or PARSERS[0]
             success = False
-            result =  parser.constructError\
+            result =  parser.encodeError\
                 ( protocolError
                 , errorConstructor
                 )
@@ -192,30 +187,28 @@ class _1_0(Parser):
     version = JSONRPC_VERSION_1_0
 
     @classmethod
-    def constructError( klass, exceptionObj, errorConstructor, **requestInfo ):
+    def encodeError( klass, exceptionObj, errorConstructor=defaultErrorConstructor, **requestInfo ):
         if not isinstance( exceptionObj, JSONRPC_BaseError ):
             exception = exceptionObj
             exceptionObj = JSONRPCApplication_UnexpectedError()
             exceptionObj.exception = exception
 
         exceptionObj.version = klass.version
-        requestID = requestInfo.get( 'requestID',Unknown )
+        requestID = requestInfo.get( 'requestID', Undefined )
 
         try:
-            return klass.encodeError\
+            return klass.doEncodeError\
                 ( requestID, *errorConstructor( exceptionObj ) )
         except JSONRPCProtocol_EncodeError as e:
-            return klass.encodeError\
+            return klass.doEncodeError\
                 ( requestID, *errorConstructor( e ) )
 
 
 
 
     @classmethod
-    def encodeError( klass, requestID, code, message, extra=None  ):
-        if requestID is None: # is a notification
-            return None
-        if requestID is Unknown:
+    def doEncodeError( klass, requestID, code, message, extra=None  ):
+        if requestID is Undefined:
             requestID = None
 
         error = {'code':code, 'message':message }
@@ -224,7 +217,7 @@ class _1_0(Parser):
         return klass.encode( {'result':None, 'id':requestID, 'error': error } )
 
     @classmethod
-    def encodeResult( klass, result ):
+    def doEncodeResponse( klass, result ):
         requestID = result.get('id',None)
         if requestID is None: # is a notification
             return None
@@ -264,7 +257,7 @@ class _1_0(Parser):
         if not isinstance( method, basestring ):
             return\
                 ( False
-                , klass.constructError\
+                , klass.encodeError\
                     ( JSONRPCProtocol_ParseError\
                         ( "'method' must be a String"
                         )
@@ -277,7 +270,7 @@ class _1_0(Parser):
         if not isinstance( params, list ):
             return\
                 ( False
-                , klass.constructError\
+                , klass.encodeError\
                     ( JSONRPCProtocol_ParseError\
                         ( "'params' must be an Array"
                         )
@@ -302,12 +295,12 @@ class _1_0(Parser):
     @classmethod
     def encodeResponse( klass, result, errorConstructor=None ):
         try:
-            return klass.encodeResult( result )
+            return klass.doEncodeResponse( result )
         except JSONRPCProtocol_EncodeError as e:
-            return klass.constructError\
+            return klass.encodeError\
                 ( e
                 , errorConstructor
-                , requestID=result.get( 'requestID',Unknown )
+                , requestID=result.get( 'id',Undefined )
                 )
 
 
@@ -317,12 +310,8 @@ class _2_0(_1_0):
     version = JSONRPC_VERSION_2_0
 
     @classmethod
-    def encodeError( klass, requestID, code, message, extra=None  ):
+    def doEncodeError( klass, requestID, code, message, extra=None  ):
         if requestID is Undefined:
-            # is a notification
-            return None
-
-        if requestID is Unknown:
             requestID = None
 
         error = {'code':code, 'message':message }
@@ -333,7 +322,7 @@ class _2_0(_1_0):
         return klass.encode( {'id':requestID, 'error': error, 'jsonrpc': klass.version } )
 
     @classmethod
-    def encodeResult( klass, result ):
+    def doEncodeResponse( klass, result ):
         requestID = result.get('id',None)
         if requestID is None:
             return None
@@ -385,7 +374,7 @@ class _2_0(_1_0):
         # so render everything as 2.0 response ( no raise )
 
         if not isinstance( method, basestring ):
-            return klass.constructError\
+            return klass.encodeError\
                 ( JSONRPCProtocol_ParseError\
                     ( "'method' must be a String"
                     )
@@ -394,7 +383,7 @@ class _2_0(_1_0):
                 )
 
         if not isinstance( params, (list,dict) ):
-            return klass.constructError\
+            return klass.encodeError\
                 ( JSONRPCProtocol_ParseError\
                     ( "'params' must be an array or dict"
                     )

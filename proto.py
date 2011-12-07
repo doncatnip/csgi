@@ -1,30 +1,3 @@
-"""
-csgi - client/server gateway interface
-
-I'm writing this, because im tired of the common practice today to
-tightly couple the http transport into the wsgi servers and making various
-bidirectional protocols dependand on wsgi - reducing their flexibility and
-counteracting DRY.
-
-WSGI really should be only a handler ontop of a HTTP transport.
-
-The idea goes as followes: find an wsgi-ish way to bubble a connection
-( which eventually might become a request) from the very bottom ( the listener )
-all the way up to some handler ( which could be a html page, or an amqp
-subscriber/publisher ).
-
-Every transport receives ( env, socket ) per connection as arguments and
-passes a read and write method to its handler while populating env with
-transport-specific stuff.
-
-read is a callable which returns a list or generator, write is a callable,
-receiving one argument.
-
-A request/connection is considered finished when its handler returns.
-
-Status: prototype
-License: Public Domain
-"""
 
 import jsonrpcio
 
@@ -257,6 +230,7 @@ class transport:
                 , 'is_handler_done': False
                 , 'status': 200
                 , 'force_chunked': self.force_chunked
+                , '_write_disable': False
                 }
 
             abort = False
@@ -283,22 +257,23 @@ class transport:
                 try:
                     self.handler( env, read, write )
                 except:
-                    has_error = True
+                    env_http['has_error'] = has_error = True
                     env_http['keepalive'] = False
-                    env_http['status'] = 500
-                    
+
                     if self.on_handler_fail:
                         try:
                             self.on_handler_fail( env, read, write )
                         except:
-                            pass
+                            env_http['status'] = 500
+                    else:
+                        env_http['status'] = 500
 
             else:
                 env_http['keepalive'] = False
 
             self._finish_response( env, socket )
             if has_error:
-                raise
+                log.exception('Could not handle HTTP request')
 
         def _finish_response( self, env, socket ):
             env_http = env['http']
@@ -648,10 +623,24 @@ class wsgi:
 
 class jsonrpc:
 
+    @staticmethod
+    def on_handler_fail( env, data, write ):
+        write\
+            ( env['rpc']['parser'].encodeError\
+                ( env['rpc']['failure']
+                , requestID=env['rpc']['requestID']
+                )
+            )
+
     class Server:
 
-        def __init__( self, handler ):
+        def __init__( self, handler, on_handler_fail=None ):
             self.handler = handler
+            self._nowrite = lambda data: None
+            if not on_handler_fail:
+                on_handler_fail = jsonrpc.on_handler_fail
+                
+            self.on_handler_fail = on_handler_fail
 
         def __call__( self, env, read, write ):
             env['rpc'] = {'type': 'jsonrpc'}
@@ -666,61 +655,67 @@ class jsonrpc:
                 
                 if not success:
                     write( data )
+                    continue
+                
                 if env['rpc']['isBatch']:
                     response = []
                     
-                    for request in data:
-                        jsonwrite = None
-                        env['rpc']['path'] = request['method']
-                        env['rpc']['requestID'] = request['id']
-                        env['rpc']['version'] = request['version']
+                    for (success, data) in data:
+                        if not success:
+                            response.append( data )
+                            continue
+                            
 
-                        params = request['params']
-                        # jsonrpc supports either args or kwargs
-                        if isinstance(params,dict):
-                            kwargs = params
-                            args = ()
-                        else:
-                            kwargs = {}
-                            args = params
-
-                        if request['id'] is not None:
+                        if data['id'] is not None:
                             jsonwrite = lambda result: response.append\
-                                ( { 'id':request['id']
+                                ( { 'id':data['id']
                                   , 'result': result
                                   }
                                 )
+                        else:
+                            jsonwrite = self._nowrite
 
-                        self.handler( env, lambda: ((args,kwargs),), jsonwrite )
+                        self._call_handler( env, data, jsonwrite )
+
 
                     write( parser.encodeResponse( response ) )
                 else:
-                    env['rpc']['path'] = data['method']
-                    env['rpc']['requestID'] = data['id']
-                    env['rpc']['version'] = data['version']
-                    params = data['params']
-
-                    if isinstance(params,dict):
-                        kwargs = params
-                        args = ()
-                    else:
-                        kwargs = {}
-                        args = params
-
-                    print ('%s,%s' % (args, kwargs))
-
-                    self.handler\
-                        ( env
-                        , lambda: ((args,kwargs),)
-                        , lambda result: write\
-                            ( parser.encodeResponse\
-                                ( { 'id': data['id']
-                                  , 'result': result
-                                  }
+                    if data['id'] is not None:
+                        jsonwrite =\
+                            lambda result: write\
+                                ( parser.encodeResponse\
+                                    ( { 'id': data['id']
+                                      , 'result': result
+                                      }
+                                    )
                                 )
-                            )
-                        )
+                    else:
+                        jsonwrite = self._nowrite
 
+                    self._call_handler( env, data, jsonwrite, parser )
+
+        def _call_handler( self, env, data, jsonwrite, parser ):
+            env['rpc']['path'] = data['method']
+            env['rpc']['requestID'] = data['id']
+            env['rpc']['version'] = data['version']
+        
+            params = data['params']
+            # jsonrpc supports either args or kwargs
+            if isinstance(params,dict):
+                kwargs = params
+                args = ()
+            else:
+                kwargs = {}
+                args = params
+
+            jsonread = lambda: ((args,kwargs),)
+            try:
+                self.handler( env, jsonread, jsonwrite )
+            except Exception as e:
+                env['rpc']['failure'] = e
+                env['rpc']['parser'] = parser
+                self.on_handler_fail( env, params, jsonwrite )
+                log.exception('Could not handle JSON-RPC request')
 
 """
 

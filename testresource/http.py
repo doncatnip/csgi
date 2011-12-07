@@ -3,6 +3,7 @@ def _404( env, read, write ):
     write( '<html><body>404 - Not found</body></html>' )
 
 def _500( env, read, write ):
+    env['http']['status'] = 500
     write( '<html><body>500 - Internal server error </body></html>' )
 
 class Hello:
