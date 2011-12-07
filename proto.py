@@ -26,7 +26,7 @@ Status: prototype
 License: Public Domain
 """
 
-#import jsonrpcio
+import jsonrpcio
 
 from gevent.queue import Queue
 from gevent import spawn, spawn_later, sleep
@@ -35,15 +35,14 @@ from gevent import socket
 from gevent.pywsgi import _BAD_REQUEST_RESPONSE, format_date_time
 
 import re, os, time
-regex = re.compile
 
 from mimetools import Message
 
 from StringIO import StringIO
 
+import logging
+log = logging.getLogger( __name__ )
 
-
-port = 8081
 
 class Undefined:
     pass
@@ -63,7 +62,7 @@ def deepcopydict(org):
 
 class Call:
     
-    def __init__( self, resource, include_env=False ):
+    def __init__( self, resource, include_env=True ):
         self.resource = resource
         self.include_env = include_env
 
@@ -97,6 +96,7 @@ class _Env:
                     self.handler.append( (key, handler ) )
 
             self.by = params.pop('by')
+            self.each = params.pop('each',None)
             self.on_not_found = params.pop\
                 ( 'on_not_found'
                 , lambda env, read, write: self._log_error( 'route not found .. env: %s' % (env,) )
@@ -118,7 +118,7 @@ class _Env:
                         groups = match.groupdict()
                         if groups:
                             env['route'].update( groups )
-                            
+                        
                         handler = handler_
                         break
 
@@ -126,18 +126,23 @@ class _Env:
                 self.on_not_found( env, read, write )
                 return
 
-            handler( env, read, write )
+            if self.each:
+                env['router']['hander'] = handler
+                self.each( env, read, write )
+            else:
+                handler( env, read, write )
 
         def _log_error( self, error ):
-            print error
+            log.error( error )
 
-    def __call__( self, env ):
-        print ('call env: %s' % (self.path,))
+    def __call__( self, env, *args ):
         value = env
         for part in self.path:
             value = value[ part ]
-        print ('value: %s' % value )
-        return value
+        if args:
+            return value( (env,)+args )
+        else:
+            return value
 
     def __init__( self, path=None, name=None ):
         if path is None:
@@ -160,10 +165,15 @@ class _Env:
 
         def __call__( self, env, r, w ):
             env_to_update = env
-            for part in self.path[:-1]:
-                env_to_update = env_to_update[ part ]
-            
-            env_to_update[ self.path[-1] ] = self.updater( env )
+            value = self.updater( env )
+
+            if self.path:
+                for part in self.path[:-1]:
+                    env_to_update = env_to_update[ part ]
+                env_to_update[ self.path[-1] ] = value
+            else:
+                env = value
+
             self.handler( env, r, w )
     
 
@@ -228,7 +238,7 @@ class transport:
                 yield line
 
     class HTTP:
-        # TODO: pipelining, client
+        # TODO: client
         MessageClass = Message
 
         def __init__( self, handler, force_chunked=False, on_handler_fail=None ):
@@ -238,15 +248,6 @@ class transport:
 
         def __call__( self, env, socket ):
             env.setdefault( 'http', {} )
-
-            ## no need to copy w/o pipelining
-            """
-            base_env = env['http'].get('_base_env',False)
-            if not base_env:
-                env['_base_env'] = deepcopydict( env ) 
-            else:
-                env = deepcopydict( base_env )
-            """
 
             env['http'] = env_http =\
                 { 'request': { 'header': None }
@@ -358,7 +359,7 @@ class transport:
             return True
 
         def _log_error( self, err, raw_requestline=''):
-            print( 'ERROR: %s' % (err % (raw_requestline,) ) )
+            log.error(err % (raw_requestline,) )
 
         def _read_request_header(self, env, socket, raw_requestline):
 
@@ -421,7 +422,7 @@ class transport:
                 , path=path
                 )
 
-            print headers.items()
+            log.debug(headers.items())
             env['request']['header'] = headers
 
             return True
@@ -521,11 +522,11 @@ class ConnectionPool:
         return client
 
 def Listen( *args, **kwargs):
-    l = _Listen( *args, **kwargs )
+    l = Listener( *args, **kwargs )
     l.start()
     return l
 
-class _Listen:
+class Listener:
     def __init__( self, socket, handler, create_env=None ):
         self.socket = socket
         self.handler = handler
@@ -534,11 +535,11 @@ class _Listen:
         self.create_env = create_env
 
     def start( self ):
+        self._disconnected = AsyncResult()
         self.connected = True
         for (connection,address) in self.socket.accept():
             spawn( self._handle_connection, connection, address )
-        print "stopped"
-        self.connected = False
+        self.stop()
 
     def _handle_connection( self, connection, address ):
         env = self.create_env()
@@ -550,11 +551,17 @@ class _Listen:
         connection.close()
             
     def stop( self ):
+        log.info('Stop listening at %s' % (self.socket.address,))
+        self._disconnected.set(True)
+        self.connected = False
         self.socket.close()
 
+    def wait_for_disconnect( self ):
+        return self._disconnected.get()
 
-re_host_tcp = regex(r'^(tcp):\/\/([a-z\.]+|([0-9]+\.){3}[0-9]+):([0-9]+)$',re.I)
-re_host_ipc = regex(r'^(ipc):\/\/(.*)$',re.I)
+
+re_host_tcp = re.compile(r'^(tcp):\/\/([a-z\.]+|([0-9]+\.){3}[0-9]+):([0-9]+)$',re.I)
+re_host_ipc = re.compile(r'^(ipc):\/\/(.*)$',re.I)
 
 def parseSocketAddress( address ):
     port = None
@@ -582,7 +589,7 @@ class Connection:
         self.write = gsocket.sendall
         self.close = gsocket.close
     
-        print "incoming request"
+        log.debug("incoming request")
 
 
 
@@ -602,7 +609,7 @@ class Socket:
         return Connection( gsocket )
 
     def accept( self ):
-        print "accept ..."
+        log.debug("accept ...")
         if self.protocol == 'ipc':
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
@@ -616,7 +623,7 @@ class Socket:
 
         s.listen(1)
 
-        print "listening on %s ..." % self.address
+        log.info( "Listening on %s ..." % self.address )
         while True:
             (connection, address) = s.accept()
             yield (Connection( connection ), address)
@@ -638,38 +645,82 @@ class wsgi:
             write('wsgi stub at %s' % env['http']['path'] )
 
 
-"""
 
 class jsonrpc:
 
-    class Client:
+    class Server:
 
         def __init__( self, handler ):
             self.handler = handler
 
         def __call__( self, read, write, env ):
-            env.setdefault('rpc',{})
-            if 'remoteclient' in env:
-                for request in read:
-                    
-                    ( success
-                    , data
-                    , requestID
-                    , version
-                    , env['rpc']['isBatch'] ) = jsonrpcio.decodeRequest( request )
+            env['rpc'] = {'type': 'jsonrpc'}
 
-                    if not success:
-                        write( data )
+            for request in read():
+                ( success
+                , data
+                , parser
+                , isBatch ) = jsonrpcio.decodeRequest( request )
 
-                    env.rpc.requestID = requestID
+                env['rpc']['isBatch'] = isBatch
+                
+                if not success:
+                    write( data )
+                if env['rpc']['isBatch']:
+                    response = []
                     
+                    for request in data:
+                        jsonwrite = None
+                        env['rpc']['path'] = request['method']
+                        env['rpc']['requestID'] = request['id']
+                        env['rpc']['version'] = request['version']
+
+                        params = request['params']
+                        # jsonrpc supports either args or kwargs
+                        if isinstance(params,dict):
+                            kwargs = params
+                            args = ()
+                        else:
+                            kwargs = {}
+                            args = params
+
+                        if request['id'] is not None:
+                            jsonwrite = lambda result: response.append\
+                                ( { 'id':request['id']
+                                  , 'result': result
+                                  }
+                                )
+
+                        self.handler( env, (args,kwargs,), jsonwrite )
+
+                    write( parser.encodeResponse( response ) )
+                else:
+                    env['rpc']['path'] = data['method']
+                    env['rpc']['requestID'] = data['id']
+                    env['rpc']['version'] = data['version']
+                    params = data['params']
+
+                    if isinstance(params,dict):
+                        kwargs = params
+                        args = ()
+                    else:
+                        kwargs = {}
+                        args = params
+
                     self.handler\
-                        ( isBatch and ( data, ) or data
-                        , lambda data: write( jsonrpcio.encodeResult( data, requestID, version ) )
-                        , env )
+                        ( env
+                        , (args,kwargs)
+                        , lambda result: write\
+                            ( parser.encodeResponse\
+                                ( { 'id': data['id']
+                                  , 'result': result
+                                  }
+                                )
+                            )
+                        )
 
 
-
+"""
 
     class Client:
         _ID = 0
@@ -699,86 +750,37 @@ class jsonrpc:
             self.socket.write( data )
 """
 
-def echo_handler( env, arg ):
-    # seconds = random.randint( 0, 2 )
-    #sleep( seconds )
-    return "echo %s from path %s" % ( arg, env['route']['path'] )
 
-def hellohttp( env, read, write ):
-    body = ()
-    if env['http']['method'] == 'POST':
-        posted = ''.join( read() )
-        body = '<h1>%s</h1>' % posted
-    else:
-        body = ''.join\
-            ( ( '<label for="testform">say something:</label>'
-              , '<form method="post"><input id="testform" type="text" name="testinput"/></form>'
-              )
-            )
 
-    write\
-        ( '<html><header></header><body>%s</body></html>'\
-            % body
-        )
+from inspect import isclass
 
-def otherhello( env, read, write ):
-    write\
-        ( '<html><header></header><body>%s</body></html>'\
-            % ('route: %s' % ( env['route'],)  )
-        )
+class LazyResource:
+    def __init__( self, module, config=None ):
+        self.module = module
+        self.loaded = {}
+        self.config = config
 
-def _404( env, read, write ):
-    env['http']['status'] = 404
-    write( '<html><body>404 - Not found</body></html>' )
+    def __getattr__( self, name ):
+        if not name in self.loaded:
+            try:
+                __import__('%s.%s' % (self.module.__name__, name) )
 
-def _500( env, read, write ):
-    write( '<html><body>500 - Internal server error </body></html>' )
-
-def wsgi_app( self, environ, start_response ):
-    pass
-
-server = Listen\
-    ( Socket( 'tcp://localhost:%s' % port)
-    , transport.HTTP\
-        ( env.Router\
-            ( ( '/', hellohttp )
-                # usefull for proxying and stuff ;)
-            , ( regex('^\/wsgiapp(?P<url>([\/\?].*|))$')
-              , env['http']['path'].set\
-                    ( env['route']['url']
-                    , wsgi.Server( wsgi_app )
+                value = LazyResource\
+                    ( getattr( self.module, name )
+                    , self.config
                     )
-              )
-            , by=env['http']['path']
-            , on_not_found=_404
-            )
-        , on_handler_fail=_500
-        )
-    )
 
-#client = ConnectionPool\
-#    ( Socket( 'ipc://testsocket' )
-#    , transport.HTTP( IOClient() )
-#    )
+            except ImportError:
+                value = getattr( self.module, name )
+                if isclass( value ):
+                    if self.config and hasattr(value, '__init__'):
+                        value = value( self.config )
+                    else:
+                        value = value()
 
+            self.loaded[ name ] = value
 
-"""
-def starttest():
-    clientIO = client()
+        return self.loaded[ name ]
 
-    i=0
-    for result in clientIO.write( 'test.echo', i ):
-        print ('response: %s' % (result,))
-        i+=1
-        if i==10:
-            break
-
-        print ('write next ...')
-        clientIO.write( 'test.echo', i )
-        print ('next done ...')
-
-    clientIO.close()
-
-"""
 
 
