@@ -1,4 +1,3 @@
-
 import jsonrpcio
 
 from gevent.queue import Queue
@@ -508,15 +507,20 @@ class Listener:
         if not create_env:
             create_env = lambda: {}
         self.create_env = create_env
+        self.connections = set()
 
     def start( self ):
         self._disconnected = AsyncResult()
         self.connected = True
         for (connection,address) in self.socket.accept():
-            spawn( self._handle_connection, connection, address )
+            try:
+                spawn( self._handle_connection, connection, address )
+            except:
+                log.exception( 'Could not handle connection at %s from %s' % (self.socket, address ) )
         self.stop()
 
     def _handle_connection( self, connection, address ):
+        self.connections.add( connection )
         env = self.create_env()
         env.update\
             ( remoteclient = { 'address':address }
@@ -527,9 +531,10 @@ class Listener:
             
     def stop( self ):
         log.info('Stop listening at %s' % (self.socket.address,))
+        self.socket.close()
+
         self._disconnected.set(True)
         self.connected = False
-        self.socket.close()
 
     def wait_for_disconnect( self ):
         return self._disconnected.get()
@@ -570,6 +575,7 @@ class Connection:
 
 class Socket:
     def __init__( self, address ):
+        self.listeningsock = None
         self.address = address
         ( self.protocol, self.host, self.port ) = parseSocketAddress( self.address )
 
@@ -597,6 +603,7 @@ class Socket:
             s.bind((self.host, self.port))
 
         s.listen(1)
+        self.listeningsock = s
 
         log.info( "Listening on %s ..." % self.address )
         while True:
@@ -609,6 +616,10 @@ class Socket:
             except OSError:
                 pass
 
+    def close( self ):
+        if self.listeningsock:
+            self.listeningsock.close()
+            self.listeningsock = None
 
 
 class wsgi:
@@ -697,11 +708,10 @@ class jsonrpc:
             try:
                 self.handler( env, jsonread, jsonwrite )
             except Exception as e:
+                log.exception('Could not handle JSON-RPC request')
                 env['rpc']['failure'] = e
                 env['rpc']['parser'] = parser
-                self.on_handler_fail( env, params, jsonwrite )
-                log.exception('Could not handle JSON-RPC request')
-
+                self.on_handler_fail( env, jsonread, jsonwrite )
 """
 
     class Client:
