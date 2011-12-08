@@ -10,6 +10,7 @@ import logging, re
 logger = logging.getLogger('')
 logger.setLevel( logging.DEBUG )
 
+
 handler = FileHandler( 'log' )
 handler.setFormatter( logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s") )
 
@@ -77,7 +78,7 @@ config['server'] = server = Listener\
         )
     )
 
-
+    
 daemon.exit_hooks.append( server.stop )
 with daemon:
     server.start()

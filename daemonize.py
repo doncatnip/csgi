@@ -3,7 +3,7 @@ from daemon import DaemonContext as _DaemonContext
 
 import gevent
 
-import sys,os, signal
+import sys,os, signal, logging, traceback
 
 class DaemonContext( _DaemonContext ):
     def __init__( self, pidfile, **kwargs ):
@@ -56,6 +56,11 @@ class DaemonContext( _DaemonContext ):
         self.files_preserve =\
             list( tuple(self.files_preserve) + tuple( logger.handler.stream for logger in self.loggers ) )
         _DaemonContext.open( self )
+
+        log = logging.getLogger('UNHANDLED')
+        sys.excepthook = lambda tp, value, tb:\
+            log.error( ''.join( traceback.format_exception( tp, value, tb ) ) )
+
         gevent.reinit()
         gevent.signal(signal.SIGTERM, self.run_exit_hooks, signal.SIGTERM, None )
 

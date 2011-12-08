@@ -517,27 +517,27 @@ class Listener:
         if not create_env:
             create_env = lambda: {}
         self.create_env = create_env
-        self.connections = set()
 
     def start( self ):
         self._disconnected = AsyncResult()
         self.connected = True
         for (connection,address) in self.socket.accept():
-            try:
-                spawn( self._handle_connection, connection, address )
-            except:
-                log.exception( 'Could not handle connection at %s from %s' % (self.socket, address ) )
+            spawn( self._handle_connection, connection, address )
         self.stop()
 
     def _handle_connection( self, connection, address ):
-        self.connections.add( connection )
-        env = self.create_env()
-        env.update\
-            ( remoteclient = { 'address':address }
-            , socket = connection
-            )
-        self.handler( env, connection )
-        connection.close()
+        try:
+            env = self.create_env()
+            env.update\
+                ( remoteclient = { 'address':address }
+                , socket = connection
+                )
+
+            self.handler( env, connection )
+        except:
+            log.exception( 'Could not handle connection at %s from %s' % (self.socket, address ) )
+        finally:
+            connection.close()
             
     def stop( self ):
         log.info('Stop listening at %s' % (self.socket.address,))
@@ -600,7 +600,6 @@ class Socket:
         return Connection( gsocket )
 
     def accept( self ):
-        log.debug("accept ...")
         if self.protocol == 'ipc':
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
@@ -794,13 +793,13 @@ class rpc:
                 spawn\
                     ( self.handler
                     , self.env
-                    , self.client_event_queue
+                    , lambda: self.client_event_queue
                     , self.server_event_queue.put )
 
             def _check_next( self, confirm_ID ):
                 result = self.server_event_queue.get()
                 self.ack_id = confirm_ID
-                self.current_result.set( result )
+                self.current_result.set( (confirm_ID, result ) )
 
             def next( self, confirm_ID, current_ID ):
                 if confirm_ID == self.ack_id:
@@ -856,7 +855,6 @@ class event:
             channels = {}
             for ( channel, handler) in self.handlers.iteritems():
                 channels[ channel ] = event._Channel( channel, write )
-            log.debug( channels )
 
             for ( channel, handler ) in self.handlers.iteritems():
                 spawn( handler, env, channels[ channel ] )
@@ -864,11 +862,10 @@ class event:
             self._keepreading( read, channels )
 
         def _keepreading( self, read, channels ):
-            log.debug('keepreading ...')
             for message in read():
                 channel = message['channel']
                 channels[ channel ].put( message['event'] )
-
+                
             for channel in channels.itervalues():
                 channel.put( StopIteration )
 

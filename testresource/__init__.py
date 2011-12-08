@@ -1,4 +1,6 @@
 from gevent import sleep, spawn
+import logging
+log = logging.getLogger(__name__)
 
 class EchoHandler:
 
@@ -8,6 +10,7 @@ class EchoHandler:
     def channel( self, env, channel ):
         channel.emit( 'Hello from %s !' % channel.name )
         for message in channel:
+            log.debug('message received: %s' % (message,) )
             spawn( self._echo_response, channel, message )
         # connection closed when no messages are left
 
