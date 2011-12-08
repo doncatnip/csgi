@@ -33,7 +33,8 @@ class DaemonContext( _DaemonContext ):
                         raise Exception('Cannot stop daemon (Timed out)')
 
                 # should just work without this - but it does not :/
-                cmd = (sys.executable, filename, '&')
+                cmd = [sys.executable, filename]+argv
+                cmd.append('&')
                 os.system( ' '.join(cmd) )
                 exit(0)
 
@@ -42,10 +43,11 @@ class DaemonContext( _DaemonContext ):
             sys.exit(-1)
 
         self.exit_hooks = kwargs.get('exit_hooks',[])
-        files_preserve = []
+        files_preserve = kwargs.pop('files_preserve',[])
         for logger in kwargs.pop('loggers',()):
             for handler in logger.handlers:
-                files_preserve.append( handler.stream )
+                if hasattr( handler, 'stream' ):
+                    files_preserve.append( handler.stream )
 
         self.loggers = []
         _DaemonContext.__init__( self, pidfile=pidfile, files_preserve=files_preserve, **kwargs )

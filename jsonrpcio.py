@@ -180,12 +180,14 @@ class Parser:
         try:
             return self.dumps( response )
         except (TypeError,ValueError):
+            log.exception( 'Cannot encode response to JSON' )
             raise JSONRPCProtocol_EncodeError()
 
     def decode( self, body ):
         try:
             return self.loads( body )
         except (TypeError,ValueError):
+            log.exception( 'Cannot decode body from JSON' )
             raise JSONRPCProtocol_DecodeError( )
 
 

@@ -8,6 +8,7 @@ from gevent.pywsgi import _BAD_REQUEST_RESPONSE, format_date_time
 
 import re, os, time
 
+from uuid import uuid4 as uuid
 from mimetools import Message
 
 from StringIO import StringIO
@@ -48,6 +49,12 @@ class Call:
             write( result )
 
 class _Env:
+    # TODO: move NotFound *handling* elsewere
+    class NotFound( Exception ):
+        def __init__( self, what ):
+            self.what = what
+            Exception.__init__(self, what)
+
     class Router:
 
         def __init__( self, *handlers, **params ):
@@ -102,7 +109,10 @@ class _Env:
                 env['route']['hander'] = handler
                 self.each( env, read, write )
             else:
-                handler( env, read, write )
+                try:
+                    handler( env, read, write )
+                except _Env.NotFound:
+                    self.on_not_found( env, read, write )
 
         def _log_error( self, error ):
             log.error( error )
@@ -631,11 +641,33 @@ class wsgi:
             write('wsgi stub at %s' % env['http']['path'] )
 
 
+class http:
+    class Method:
+        def __init__( self, POST=None, GET=None, on_not_found=None ):
+            self.handler = {}
+            if POST:
+                self.handler['POST'] = POST
+            if GET:
+                self.handler['GET'] = GET
+            if not on_not_found:
+                on_not_found = self._on_not_found
+            self.on_not_found = on_not_found
+
+        def __call__( self, env, read, write ):
+            method = env['http']['method']
+            handler = self.handler.get( method, None )
+            if handler:
+                handler( env, read, write )
+            else:
+                self._on_not_found( env, read, write )
+
+        def _on_not_found( self, env, read, write ):
+            raise _Env.NotFound( env['http']['method'] )
 
 class jsonrpc:
 
     @staticmethod
-    def on_handler_fail( env, data, write ):
+    def on_handler_fail( env, read, write ):
         write\
             ( env['rpc']['parser'].encodeError\
                 ( env['rpc']['failure']
@@ -712,6 +744,10 @@ class jsonrpc:
                 env['rpc']['failure'] = e
                 env['rpc']['parser'] = parser
                 self.on_handler_fail( env, jsonread, jsonwrite )
+
+
+
+
 """
 
     class Client:
@@ -742,6 +778,99 @@ class jsonrpc:
             self.socket.write( data )
 """
 
+
+class rpc:
+    class LongPoll:
+
+        class Connection:
+            def __init__( self, handler, env ):
+                self.handler = handler
+                self.server_event_queue = Queue()
+                self.client_event_queue = Queue()
+                self.ack_id = None
+                self.env = deepcopydict( env )
+                self._id = uuid().hex
+
+                spawn\
+                    ( self.handler
+                    , self.env
+                    , self.client_event_queue
+                    , self.server_event_queue.put )
+
+            def _check_next( self, confirm_ID ):
+                result = self.server_event_queue.get()
+                self.ack_id = confirm_ID
+                self.current_result.set( result )
+
+            def next( self, confirm_ID, current_ID ):
+                if confirm_ID == self.ack_id:
+                    self.ack_id = None
+                    self.current_result = AsyncResult()
+                    spawn( self._check_next, current_ID )
+
+                return self.current_result.get()
+
+            def emit( self, event ):
+                self.client_event_queue.put( event )
+
+        def __init__( self, handler ):
+            self.handler = handler
+            self.connections = {}
+
+        def connect( self, env, read, write ):
+            for request in read():
+                connection = self.Connection( self.handler, env )
+                self.connections[ connection._id ] = connection
+                write( connection._id )
+
+        def next( self, env, read, write ):
+            current_ID = env['rpc']['requestID']
+            for (args,kwargs) in read():
+                (connection_ID,confirm_ID) = args
+                connection = self.connections[connection_ID]
+                result = connection.next( confirm_ID, current_ID )
+                write( result )
+
+        def emit( self, env, read, write ):
+            for (args,kwargs) in read():
+                (connection_ID,event) = args
+                connection = self.connections[connection_ID]
+                connection.emit( event )
+
+class event:
+    class _Channel( Queue ):
+        def __init__( self, name, write ):
+            self.name = name
+            self._write = write
+            Queue.__init__( self )
+
+        def emit( self, event ):
+            self._write( {'channel': self.name, 'event': event } )
+
+    class Channel:
+
+        def __init__( self, handlers ):
+            self.handlers = handlers
+
+        def __call__( self, env, read, write ):
+            channels = {}
+            for ( channel, handler) in self.handlers.iteritems():
+                channels[ channel ] = event._Channel( channel, write )
+            log.debug( channels )
+
+            for ( channel, handler ) in self.handlers.iteritems():
+                spawn( handler, env, channels[ channel ] )
+
+            self._keepreading( read, channels )
+
+        def _keepreading( self, read, channels ):
+            log.debug('keepreading ...')
+            for message in read():
+                channel = message['channel']
+                channels[ channel ].put( message['event'] )
+
+            for channel in channels.itervalues():
+                channel.put( StopIteration )
 
 
 from inspect import isclass
