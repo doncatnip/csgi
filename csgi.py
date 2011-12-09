@@ -1,9 +1,8 @@
 import jsonrpcio
 
-from gevent.queue import Queue
-from gevent import spawn, spawn_later, sleep
+from gevent import socket, spawn
+from gevent.queue import Queue, Timeout
 from gevent.event import AsyncResult
-from gevent import socket
 from gevent.pywsgi import _BAD_REQUEST_RESPONSE, format_date_time
 
 import re, os, time
@@ -11,11 +10,10 @@ import re, os, time
 from uuid import uuid4 as uuid
 from mimetools import Message
 
-from StringIO import StringIO
-
 import logging
 log = logging.getLogger( __name__ )
 
+#TODO: tests; clients; organize to submodules ofc.; stuff
 
 class Undefined:
     pass
@@ -517,11 +515,13 @@ class Listener:
         if not create_env:
             create_env = lambda: {}
         self.create_env = create_env
+        self.connections = set()
 
     def start( self ):
         self._disconnected = AsyncResult()
         self.connected = True
         for (connection,address) in self.socket.accept():
+            self.connections.add( connection )
             spawn( self._handle_connection, connection, address )
         self.stop()
 
@@ -538,9 +538,11 @@ class Listener:
             log.exception( 'Could not handle connection at %s from %s' % (self.socket, address ) )
         finally:
             connection.close()
+            self.connections.remove( connection )
             
     def stop( self ):
         log.info('Stop listening at %s' % (self.socket.address,))
+        # TODO: run some kind of hooks for a clear handler shutdown
         self.socket.close()
 
         self._disconnected.set(True)
@@ -627,7 +629,7 @@ class Socket:
 
     def close( self ):
         if self.listeningsock:
-            self.listeningsock.close()
+            self.listeningsock.shutdown( socket.SHUT_RDWR )
             self.listeningsock = None
 
 
@@ -782,7 +784,9 @@ class rpc:
     class LongPoll:
 
         class Connection:
-            def __init__( self, handler, env ):
+            def __init__( self, env, connections, handler, timeout ):
+                self.ack_timeout = timeout
+                self.connections = connections
                 self.handler = handler
                 self.server_event_queue = Queue()
                 self.client_event_queue = Queue()
@@ -790,46 +794,62 @@ class rpc:
                 self.env = deepcopydict( env )
                 self._id = uuid().hex
 
+                spawn( self._kill_idle )
                 spawn\
                     ( self.handler
                     , self.env
                     , lambda: self.client_event_queue
                     , self.server_event_queue.put )
 
+
             def _check_next( self, confirm_ID ):
                 result = self.server_event_queue.get()
                 self.ack_id = confirm_ID
                 self.current_result.set( (confirm_ID, result ) )
+                self._kill_idle()
 
             def next( self, confirm_ID, current_ID ):
                 if confirm_ID == self.ack_id:
                     self.ack_id = None
+                    self.ack_done.set(True)
                     self.current_result = AsyncResult()
                     spawn( self._check_next, current_ID )
 
-                return self.current_result.get()
+                return self.current_result.get( )
 
             def emit( self, event ):
                 self.client_event_queue.put( event )
 
-        def __init__( self, handler ):
+            def _kill_idle( self ):
+                self.ack_done = AsyncResult()
+                try:
+                    self.ack_done.get( timeout=self.ack_timeout )
+                except:
+                    self.client_event_queue.put( StopIteration )
+                    self.server_event_queue.put( StopIteration )
+                    del self.connections[ self._id ]
+
+        def __init__( self, handler, ack_timeout=20 ):
             self.handler = handler
             self.connections = {}
+            self.ack_timeout = ack_timeout
 
         def connect( self, env, read, write ):
             for request in read():
-                connection = self.Connection( self.handler, env )
+                connection = self.Connection( env, self.connections, self.handler, self.ack_timeout )
                 self.connections[ connection._id ] = connection
-                write( connection._id )
+                write( (connection._id, self.ack_timeout) )
 
         def next( self, env, read, write ):
             current_ID = env['rpc']['requestID']
             for (args,kwargs) in read():
                 (connection_ID,confirm_ID) = args
                 connection = self.connections[connection_ID]
+
                 result = connection.next( confirm_ID, current_ID )
                 write( result )
 
+        # should be sent as notification
         def emit( self, env, read, write ):
             for (args,kwargs) in read():
                 (connection_ID,event) = args
@@ -837,13 +857,23 @@ class rpc:
                 connection.emit( event )
 
 class event:
+
     class _Channel( Queue ):
+        class Closed( Exception ):
+            def __init__( self ):
+                Exception.__init__( self, 'Channel is closed' )
+
+        is_open = True
+
         def __init__( self, name, write ):
             self.name = name
             self._write = write
             Queue.__init__( self )
 
         def emit( self, event ):
+            if not self.is_open:
+                raise self.Closed()
+
             self._write( {'channel': self.name, 'event': event } )
 
     class Channel:
@@ -867,6 +897,7 @@ class event:
                 channels[ channel ].put( message['event'] )
                 
             for channel in channels.itervalues():
+                channel.is_open = False
                 channel.put( StopIteration )
 
 

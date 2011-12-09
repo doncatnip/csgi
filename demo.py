@@ -16,7 +16,7 @@ handler.setFormatter( logging.Formatter("%(asctime)s - %(name)s - %(levelname)s 
 
 logger.addHandler(handler)
 
-daemon = DaemonContext( loggers=(logger,), pidfile='pid' )
+daemon = DaemonContext( stderr=handler.stream, pidfile='pid' )
 
 # server setup
 
@@ -78,7 +78,6 @@ config['server'] = server = Listener\
         )
     )
 
-    
 daemon.exit_hooks.append( server.stop )
 with daemon:
     server.start()

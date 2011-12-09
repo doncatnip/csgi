@@ -4,12 +4,13 @@ from daemon import DaemonContext as _DaemonContext
 import gevent
 
 import sys,os, signal, logging, traceback
+log = logging.getLogger(__name__)
 
 class DaemonContext( _DaemonContext ):
     def __init__( self, pidfile, **kwargs ):
 
         argv = list(sys.argv)
-        filename = os.path.abspath( argv.pop(0) )
+        filename = self.filename = os.path.abspath( argv.pop(0) )
         path = os.path.dirname(filename)
 
         if isinstance( pidfile, basestring ):
@@ -50,18 +51,34 @@ class DaemonContext( _DaemonContext ):
                     files_preserve.append( handler.stream )
 
         self.loggers = []
+        filename = os.path.basename( self.filename)
+
+        try:
+            from setproctitle import setproctitle
+            setproctitle( filename )
+        except ImportError:
+            import ctypes
+            try:
+                libc = ctypes.CDLL("libc.so.6")
+                libc.prctl(15, filename, 0, 0, 0)
+            except:
+                pass
+
+
         _DaemonContext.__init__( self, pidfile=pidfile, files_preserve=files_preserve, **kwargs )
 
     def open( self ):
+
         self.files_preserve =\
             list( tuple(self.files_preserve) + tuple( logger.handler.stream for logger in self.loggers ) )
         _DaemonContext.open( self )
-
-        log = logging.getLogger('UNHANDLED')
-        sys.excepthook = lambda tp, value, tb:\
-            log.error( ''.join( traceback.format_exception( tp, value, tb ) ) )
-
         gevent.reinit()
+
+        ## not reliable w/ gevent, unfortunateley .. use stderr redirect instead
+        #log = logging.getLogger('UNHANDLED')
+        #sys.excepthook = lambda tp, value, tb:\
+        #    log.error( ''.join( traceback.format_exception( tp, value, tb ) ) )
+
         gevent.signal(signal.SIGTERM, self.run_exit_hooks, signal.SIGTERM, None )
 
     def run_exit_hooks( self, signal, frame ):
