@@ -1,7 +1,10 @@
-from csgi import Listener, Socket, LazyResource, Call, env, transport, http, wsgi, jsonrpc, rpc, event
+from csgi import    Listener, Socket, ConnectionPool, Farm, LazyResource, Call,\
+                    env, transport, http, wsgi, jsonrpc, rpc, event, marshal
 
 from logging import FileHandler
 from daemonize import DaemonContext
+
+from gevent import spawn, spawn_later
 
 import logging, re
 
@@ -10,13 +13,12 @@ import logging, re
 logger = logging.getLogger('')
 logger.setLevel( logging.DEBUG )
 
-
 handler = FileHandler( 'log' )
 handler.setFormatter( logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s") )
 
 logger.addHandler(handler)
 
-daemon = DaemonContext( stderr=handler.stream, pidfile='pid' )
+# daemon = DaemonContext( stderr=handler.stream, pidfile='pid' )
 
 # server setup
 
@@ -25,15 +27,18 @@ import testresource
 config = {'some':'config'}
 config['resource'] = resource = LazyResource( testresource, config )
 
-#config['workerclient'] = ConnectionPool\
-#    ( Socket( 'ipc://worker.sock' )
-#    , transport.Line( jsonrpc.Client() )
-#    )
 
-#config['worker'] = workserver = Listener\
-#    ( Socket( 'ipc://worker.sock' )
-#    , transport.Line( jsonrpc.Server( resource.Worker ) )
-#    )
+config['workerclient'] = ConnectionPool\
+    ( Socket( 'ipc://worker.sock' )
+    , transport.Line( marshal.Json( event.Client() ) )
+    )
+
+config['worker'] = workserver = Listener\
+    ( Socket( 'ipc://worker.sock' )
+    , transport.Line( marshal.Json( event.Channel\
+            ( { 'workerchannel': resource.Worker }
+            ) ) )
+    )
 
 services = env.Router\
     ( ( 'service.echo', resource.EchoHandler.echo )
@@ -78,7 +83,25 @@ config['server'] = server = Listener\
         )
     )
 
+def _clienttest():
+    client = config['workerclient']()
+    channel = client.open( 'workerchannel' )
+
+    spawn_later( 5, channel.emit, 'somework' )
+    for message in channel:
+        print message
+
+
+spawn( _clienttest )
+
+server = Farm( server, workserver )
+"""
 daemon.exit_hooks.append( server.stop )
 with daemon:
+"""
+try:
     server.start()
+
+finally:
+    server.stop()
 

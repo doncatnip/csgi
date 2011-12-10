@@ -1,7 +1,10 @@
 import jsonrpcio
+from gevent import monkey
+monkey.patch_all()
 
-from gevent import socket, spawn
-from gevent.queue import Queue, Timeout
+from gevent import socket, spawn, joinall, sleep
+
+from gevent.queue import Queue
 from gevent.event import AsyncResult
 from gevent.pywsgi import _BAD_REQUEST_RESPONSE, format_date_time
 
@@ -209,12 +212,16 @@ class transport:
 
         def __call__( self, env, socket ):
             self.handler\
-                ( lambda: self._readlines( socket )
+                ( env
+                , lambda: self._readlines( socket )
                 , lambda data: socket.write( data+'\r\n' )
-                , env )
+                )
 
         def _readlines( self, socket ):
-            for line in socket.readline():
+            while True:
+                line = socket.readline()
+                if not line:
+                    break
                 yield line
 
     class HTTP:
@@ -278,9 +285,10 @@ class transport:
             else:
                 env_http['keepalive'] = False
 
-            self._finish_response( env, socket )
             if has_error:
                 log.exception('Could not handle HTTP request')
+
+            self._finish_response( env, socket )
 
         def _finish_response( self, env, socket ):
             env_http = env['http']
@@ -292,7 +300,6 @@ class transport:
 
             if env_http['keepalive']:
                 self( env, socket )
-
 
         def _write( self, env, socket, data ):
             if not isinstance( data, basestring ):
@@ -318,7 +325,7 @@ class transport:
 
         def _read( self, env, socket ):
             if not env['is_header_read']:
-                header = socket.readline( )
+                header = socket.readline()
                 self._read_response_header( env, header )
                 env['is_header_read'] = True
 
@@ -347,7 +354,6 @@ class transport:
 
             requestline = raw_requestline.rstrip()
             words = requestline.split()
-            
             if len(words) == 3:
                 command, path, request_version = words
                 if not self._check_http_version( request_version ):
@@ -435,7 +441,11 @@ class transport:
                     if env['request_version'] != 'HTTP/1.0':
                         response_headers.append(('Transfer-Encoding', 'chunked'))
 
-            towrite = [ '%s %s\r\n' % (env['request_version'], env['status']) ]
+            if not 'Content-Type' in response_headers_list:
+                response_headers.append(('Content-Type', 'text/html; charset=UTF-8') )
+
+            status_text = 'OK'
+            towrite = [ '%s %s %s\r\n' % (env['request_version'], env['status'], status_text) ]
             for header in response_headers:
                 towrite.append('%s: %s\r\n' % header)
 
@@ -459,49 +469,36 @@ class transport:
 
             socket.write ( response )
 
-class IOQueue:
-
-    def __init__( self, releaseCB ):
-        self.input_queue = Queue()
-        self.output_queue = Queue()
-        self.read = self.__iter__ = lambda: self.output_queue
-
-        self.releaseCB = releaseCB
-
-    def __call__( self, *args, **kwargs ):
-        self.input_queue.put( (args, kwargs) )
-        return self.output_queue.get()
-
-    def write( self, *args, **kwargs ):
-        self.input_queue.put( (args, kwargs) )
-        return self
-
-    def close( self ):
-        self.input_queue.put( StopIteration )
-        self.output_queue.put( StopIteration )
-        self.releaseCB( )
 
 class ConnectionPool:
 
-    def __init__( self, socket, handler, clientClass=IOQueue ):
+    def __init__( self, socket, handler, create_env=lambda: {} ):
         self.socket = socket
         self.handler = handler
-        self.clientClass = clientClass
+        self.create_env = create_env
+        self.connections = set() # TODO the actual pool
 
     def __call__( self, *args, **kwargs ):
-        _socket = self.socket.connect()
-        client = self.clientClass( _socket.release )
+        socket = self.socket.connect()
+        env = self.create_env()
+        env.update\
+            ( { 'socket': self.socket
+              , 'localclient': { 'args': args, 'kwargs': kwargs, 'result': AsyncResult() } 
+              }
+            )
 
         spawn\
             ( self.handler
-            , _socket )
-
-        if args or kwargs:
-            result = client( *args, **kwargs )
-            client.close()
-            return result
+            , env
+            , socket
+            )
         
-        return client
+        return env['localclient']['result'].get()
+
+
+
+
+
 
 def Listen( *args, **kwargs):
     l = Listener( *args, **kwargs )
@@ -515,13 +512,11 @@ class Listener:
         if not create_env:
             create_env = lambda: {}
         self.create_env = create_env
-        self.connections = set()
 
     def start( self ):
         self._disconnected = AsyncResult()
         self.connected = True
         for (connection,address) in self.socket.accept():
-            self.connections.add( connection )
             spawn( self._handle_connection, connection, address )
         self.stop()
 
@@ -538,7 +533,6 @@ class Listener:
             log.exception( 'Could not handle connection at %s from %s' % (self.socket, address ) )
         finally:
             connection.close()
-            self.connections.remove( connection )
             
     def stop( self ):
         log.info('Stop listening at %s' % (self.socket.address,))
@@ -564,7 +558,7 @@ def parseSocketAddress( address ):
     else:
         m = re_host_ipc.match( address )
         if not m:
-            raise SyntaxError('%s is not a valid address ( (tcp://host[:port]|ipc://file) is required )' % host ) 
+            raise SyntaxError('%s is not a valid address ( (tcp://host[:port]|ipc://file) is required )' % address ) 
         ( protocol, host ) = m.groups()
 
     return ( protocol.lower(), host.lower(), port )
@@ -578,17 +572,26 @@ class Connection:
 
         self.readline = self.rfile.readline
         self.read = self.rfile.read
-        self.write = gsocket.sendall
-        self.close = gsocket.close
-    
+
         log.debug("incoming connection")
 
+    def write( self, data ):
+        self.rfile.write( data )
+        self.rfile.flush()
+
+    def close( self ):
+        self.rfile.close()
+        self.gsocket.close()
 
 
 class Socket:
-    def __init__( self, address ):
+    # TODO: move user, group into ipc address query string
+    def __init__( self, address, user=None, backlog=255 ):
         self.listeningsock = None
         self.address = address
+        self.backlog = backlog
+        self.user = user
+
         ( self.protocol, self.host, self.port ) = parseSocketAddress( self.address )
 
         if self.protocol not in ('ipc','tcp'):
@@ -602,35 +605,63 @@ class Socket:
         return Connection( gsocket )
 
     def accept( self ):
+
         if self.protocol == 'ipc':
+            try:
+                os.remove( self.host )
+            except OSError:
+                pass
+
+            #s.bind( self.host )
+
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
                 os.remove( self.host )
             except OSError:
                 pass
-            s.bind( self.host  )
+                s.bind( self.host )
+                os.chmod(self.host,0770)
+                if self.user:
+                    import pwd
+
+                    pe = pwd.getpwnam( self.user )
+                    os.chown(self.host, pe.pw_uid, pe.pw_gid)
         else:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind((self.host, self.port))
 
-        s.listen(1)
+        s.listen( self.backlog )
+
         self.listeningsock = s
 
         log.info( "Listening on %s ..." % self.address )
-        while True:
-            (connection, address) = s.accept()
-            yield (Connection( connection ), address)
+        exec_count=0
 
-        if self.protocol == 'ipc':
+        while True:
             try:
-                os.remove( self.host )
-            except OSError:
-                pass
+                (connection, addr)  = s.accept()
+                yield (Connection( socket.socket(_sock=connection) ), addr )
+            except:
+                log.exception('Could not accept a connection...')
+                sleep(0.5*exec_count)
+                exec_count+=1
+            else:
+                exec_count=0
+
+
 
     def close( self ):
         if self.listeningsock:
             self.listeningsock.shutdown( socket.SHUT_RDWR )
             self.listeningsock = None
+
+            if self.protocol == 'ipc':
+                try:
+                    os.remove( self.host )
+                except OSError:
+                    pass
+
 
 
 class wsgi:
@@ -665,6 +696,21 @@ class http:
         def _on_not_found( self, env, read, write ):
             raise _Env.NotFound( env['http']['method'] )
 
+class marshal:
+
+    class Json:
+        def __init__( self, handler, loads=None, dumps=None):
+            self.handler = handler
+            self.loads = loads or jsonrpcio.loads
+            self.dumps = dumps or jsonrpcio.dumps
+
+        def __call__( self, env, read, write ):
+            self.handler\
+                ( env
+                , lambda : ( self.loads( r ) for r in read() )
+                , lambda data: write (self.dumps( data ) )
+                )
+
 class jsonrpc:
 
     @staticmethod
@@ -696,7 +742,6 @@ class jsonrpc:
                 , parser
                 , isBatch
                 ) = self.parser.decodeRequest( request )
-
                 env['rpc']['isBatch'] = isBatch
                 
                 if not success:
@@ -722,6 +767,7 @@ class jsonrpc:
                         jsonwrite = self._nowrite
 
                     self._call_handler( env, data, jsonwrite, parser )
+
 
         def _call_handler( self, env, data, jsonwrite, parser ):
             env['rpc']['path'] = data['method']
@@ -876,6 +922,40 @@ class event:
 
             self._write( {'channel': self.name, 'event': event } )
 
+
+    class _ChannelConnector:
+        def __init__( self, env, read, write ):
+            self.env = env
+            self.read = read
+            self.write = write
+            self.channels = {}
+
+        def open( self, name ):
+            channel = self.channels.get( name, None )
+            if channel:
+                return channel
+
+            channel = event._Channel( name, self.write )
+            self.channels[ name ] = channel
+            return channel
+
+        def _keepreading( self ):
+            for message in self.read():
+                channel = message['channel']
+                channel = self.channels.get( channel, None )
+                if channel:
+                    channel.put( message['event'] )
+                
+            for channel in self.channels.itervalues():
+                self.channel.is_open = False
+                self.channel.put( StopIteration )
+
+    class Client:
+        def __call__( self, env, read, write ):
+            client = event._ChannelConnector( env, read, write )
+            env['localclient']['result'].set( client )
+            client._keepreading()
+
     class Channel:
 
         def __init__( self, handlers ):
@@ -932,4 +1012,17 @@ class LazyResource:
         return self.loaded[ name ]
 
 
+class Farm:
+    def __init__( self, *servers ):
+        self.servers = servers
 
+    def start( self ):
+        jobs = []
+        for server in self.servers:
+            jobs.append( spawn( server.start ) )
+
+        joinall( jobs )
+
+    def stop( self ):
+        for server in self.servers:
+            server.stop()

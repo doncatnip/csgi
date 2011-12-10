@@ -115,15 +115,17 @@ def datetime_decoder(d):
     elif isinstance(d, dict):
         return dict(result)
 
+loads = _loads = lambda text: json.loads(text, object_hook=datetime_decoder)
+dumps = _dumps = lambda obj: json.dumps(obj, cls=JSONDateTimeEncoder)
 
 class Parser:
     version = None
 
     def __init__( self, loads=None, dumps=None, errorConstructor=defaultErrorConstructor ):
         if not loads:
-            loads = lambda text: json.loads(text, object_hook=datetime_decoder)
+            loads = _loads
         if not dumps:
-            dumps = lambda obj: json.dumps(obj, cls=JSONDateTimeEncoder)
+            dumps = _dumps
 
         self.errorConstructor = errorConstructor
         self.loads = loads
@@ -187,7 +189,7 @@ class Parser:
         try:
             return self.loads( body )
         except (TypeError,ValueError):
-            log.exception( 'Cannot decode body from JSON' )
+            log.exception( 'Cannot decode body %s from JSON' % (body,) )
             raise JSONRPCProtocol_DecodeError( )
 
 

@@ -12,6 +12,8 @@ class DaemonContext( _DaemonContext ):
         argv = list(sys.argv)
         filename = self.filename = os.path.abspath( argv.pop(0) )
         path = os.path.dirname(filename)
+        working_directory = kwargs.get('working_directory',None)
+        kwargs.setdefault( 'working_directory', path )
 
         if isinstance( pidfile, basestring ):
             if pidfile[0] != '/':

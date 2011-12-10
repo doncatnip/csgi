@@ -8,7 +8,7 @@ class EchoHandler:
         return arg
 
     def channel( self, env, channel ):
-        channel.emit( 'Hello from %s !' % channel.name )
+        #channel.emit( 'Hello from %s !' % channel.name )
         ping = spawn( self._ping, channel )
 
         for message in channel:
@@ -30,3 +30,21 @@ class EchoHandler:
             sleep(60)
             log.debug('pinging ...')
             channel.emit( 'ping' )
+
+
+class Worker:
+
+    def __call__( self, env, channel ):
+        channel.emit('gimme work !')
+        for message in channel:
+            if not message == 'stop':
+                channel.emit( 'ok, will do %s' % message )
+                worker = spawn(getattr(self,message), channel )
+            else:
+                worker.kill()
+                channel.emit( 'stopped' )
+
+    def somework(self, channel):
+        while True:
+            sleep(10)
+            channel.emit( 'still working' )
