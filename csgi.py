@@ -106,7 +106,7 @@ class _Env:
                 return
 
             if self.each:
-                env['route']['hander'] = handler
+                env['route']['handler'] = handler
                 self.each( env, read, write )
             else:
                 try:

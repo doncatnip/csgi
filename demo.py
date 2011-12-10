@@ -44,7 +44,7 @@ services = env.Router\
     ( ( 'service.echo', resource.EchoHandler.echo )
     , ( 'other.echo', resource.EchoHandler.echo )
     , by=env['rpc']['path']
-    , each=Call( env['route']['hander'] )
+    , each=Call( env['route']['handler'] )
     )
 
 channels = event.Channel\
