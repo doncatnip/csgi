@@ -83,15 +83,22 @@ config['server'] = server = Listener\
         )
     )
 
+def _print_message( channel, message ):
+    print message
+
 def _clienttest():
     client = config['workerclient']()
+
     channel = client.open( 'workerchannel' )
 
-    spawn_later( 5, channel.emit, 'somework' )
-    spawn_later( 30, channel.emit, 'stop' )
-    
-    for message in channel:
-        print message
+    channel.absorb( _print_message )
+
+    spawn_later( 1, channel.emit, 'somework' )
+    spawn_later( 15, channel.emit, 'stop' )
+    spawn_later( 20, workserver.stop )
+
+    channel.listen()
+    print "closed"
 
 spawn( _clienttest )
 

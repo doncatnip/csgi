@@ -10,6 +10,7 @@ import re, os, time
 
 from uuid import uuid4 as uuid
 from mimetools import Message
+from gevent import Timeout
 
 import logging
 log = logging.getLogger( __name__ )
@@ -216,11 +217,14 @@ class transport:
                 )
 
         def _readlines( self, socket ):
+
             while True:
                 line = socket.readline()
+
                 if not line:
                     break
                 yield line
+
 
     class HTTP:
         # TODO: client
@@ -516,8 +520,7 @@ class Listener:
         self.connected = True
         for (connection,address) in self.socket.accept():
             spawn( self._handle_connection, connection, address )
-        self.stop()
-
+        
     def _handle_connection( self, connection, address ):
         try:
             env = self.create_env()
@@ -533,7 +536,7 @@ class Listener:
             connection.close()
             
     def stop( self ):
-        log.info('Stop listening at %s' % (self.socket.address,))
+        log.info('Stop listening at %s (%s)' % (self.socket.address,self))
         # TODO: run some kind of hooks for a clear handler shutdown
         self.socket.close()
 
@@ -564,22 +567,28 @@ def parseSocketAddress( address ):
 
 class Connection:
 
-    def __init__( self, gsocket ):
+    def __init__( self, gsocket, close_cb=lambda: None ):
         self.gsocket = gsocket
-        self.rfile = gsocket.makefile()
+        self.rfile = gsocket.makefile('rb', -1)
+        self.wfile = gsocket.makefile('wb', 0)
 
         self.readline = self.rfile.readline
         self.read = self.rfile.read
 
-        log.debug("incoming connection")
+        self.close_cb = close_cb
+        log.debug("new connection")
 
     def write( self, data ):
-        self.rfile.write( data )
-        self.rfile.flush()
+        self.wfile.write( data )
+        self.wfile.flush()
 
     def close( self ):
+        self.wfile.flush()
         self.rfile.close()
+        self.wfile.close()
+        self.gsocket._sock.close()
         self.gsocket.close()
+        self.close_cb( self )
 
 
 class Socket:
@@ -589,6 +598,7 @@ class Socket:
         self.address = address
         self.backlog = backlog
         self.user = user
+        self.connections = set()
 
         ( self.protocol, self.host, self.port ) = parseSocketAddress( self.address )
 
@@ -613,17 +623,13 @@ class Socket:
             #s.bind( self.host )
 
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            try:
-                os.remove( self.host )
-            except OSError:
-                pass
-                s.bind( self.host )
-                os.chmod(self.host,0770)
-                if self.user:
-                    import pwd
+            s.bind( self.host )
+            os.chmod(self.host,0770)
+            if self.user:
+                import pwd
 
-                    pe = pwd.getpwnam( self.user )
-                    os.chown(self.host, pe.pw_uid, pe.pw_gid)
+                pe = pwd.getpwnam( self.user )
+                os.chown(self.host, pe.pw_uid, pe.pw_gid)
         else:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -633,26 +639,33 @@ class Socket:
 
         self.listeningsock = s
 
-        log.info( "Listening on %s ..." % self.address )
+        log.info( "Listening on %s (%s) ..." % (self.address,self) )
         exec_count=0
 
         while True:
             try:
-                (connection, addr)  = s.accept()
-                yield (Connection( socket.socket(_sock=connection) ), addr )
+                (connection, addr)  = self.listeningsock.accept()
+                connection = Connection( socket.socket(_sock=connection), self._remove_connection )
+                self.connections.add( connection )
+                yield (connection, addr )
             except:
+                if not self.listeningsock:
+                    break
                 log.exception('Could not accept a connection...')
                 sleep(0.5*exec_count)
                 exec_count+=1
             else:
                 exec_count=0
 
-
-
     def close( self ):
         if self.listeningsock:
-            self.listeningsock.shutdown( socket.SHUT_RDWR )
+            for connection in list(self.connections):
+                connection.close()
+
+            s = self.listeningsock
             self.listeningsock = None
+            s._sock.close()
+            s.close()
 
             if self.protocol == 'ipc':
                 try:
@@ -660,6 +673,8 @@ class Socket:
                 except OSError:
                     pass
 
+    def _remove_connection( self, connection ):
+        self.connections.remove( connection )
 
 
 class wsgi:
@@ -902,7 +917,7 @@ class rpc:
 
 class event:
 
-    class _Channel( Queue ):
+    class _Channel:
         class Closed( Exception ):
             def __init__( self ):
                 Exception.__init__( self, 'Channel is closed' )
@@ -912,13 +927,32 @@ class event:
         def __init__( self, name, write ):
             self.name = name
             self._write = write
-            Queue.__init__( self )
+            self._stopped = AsyncResult()
+            self._started = AsyncResult()
+            self.callbacks = {}
+        
+        def listen( self ):
+            self._started.set(True)
+            return self._stopped.get()
 
         def emit( self, event ):
             if not self.is_open:
                 raise self.Closed()
 
             self._write( {'channel': self.name, 'event': event } )
+
+        def run_callbacks( self, event ):
+            self._started.get()
+            for (callback,(args,kwargs)) in self.callbacks.iteritems():
+                callback( self, event, *args, **kwargs )
+
+        def absorb( self, callback, *args, **kwargs ):
+            #callback.leave = lambda: self.callbacks.pop( callback )
+            self.callbacks[ callback ] = (args,kwargs)
+
+        def _close( self ):
+            self.is_open = False
+            self._stopped.set(True)
 
 
     class _ChannelConnector:
@@ -942,11 +976,10 @@ class event:
                 channel = message['channel']
                 channel = self.channels.get( channel, None )
                 if channel:
-                    channel.put( message['event'] )
+                    spawn( channel.run_callbacks, message['event'] )
                 
             for channel in self.channels.itervalues():
-                self.channel.is_open = False
-                self.channel.put( StopIteration )
+                channel._close()
 
     class Client:
         def __call__( self, env, read, write ):
@@ -972,11 +1005,10 @@ class event:
         def _keepreading( self, read, channels ):
             for message in read():
                 channel = message['channel']
-                channels[ channel ].put( message['event'] )
+                spawn( channels[ channel ].run_callbacks, message['event'] )
                 
             for channel in channels.itervalues():
-                channel.is_open = False
-                channel.put( StopIteration )
+                channel._close()
 
 
 from inspect import isclass

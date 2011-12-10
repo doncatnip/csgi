@@ -10,15 +10,13 @@ class EchoHandler:
     def channel( self, env, channel ):
         #channel.emit( 'Hello from %s !' % channel.name )
         ping = spawn( self._ping, channel )
-
-        for message in channel:
-            log.debug('message received: %s' % (message,) )
-            spawn( self._echo_response, channel, message )
-
+        channel.absorb( self._echo_response )
+        channel.listen()
         ping.kill()
         log.debug('closing ....')
 
     def _echo_response( self, channel, message ):
+        log.debug('message received: %s' % (message,) )
         sleep(10)
         channel.emit( 'Message received: %s' % message )
 
@@ -33,18 +31,24 @@ class EchoHandler:
 
 
 class Worker:
+    worker = None
+
+    def _handle_cmd( self, channel, message ):
+        if not message == 'stop':
+            channel.emit( 'ok, will do %s' % message )
+            self.worker = spawn(getattr(self,message), channel )
+        elif self.worker:
+            self.worker.kill()
+            channel.emit( 'stopped' )
 
     def __call__( self, env, channel ):
         channel.emit('gimme work !')
-        for message in channel:
-            if not message == 'stop':
-                channel.emit( 'ok, will do %s' % message )
-                worker = spawn(getattr(self,message), channel )
-            else:
-                worker.kill()
-                channel.emit( 'stopped' )
+        channel.absorb( self._handle_cmd )
+        channel.listen()
+        if self.worker:
+            self.worker.kill()
 
     def somework(self, channel):
         while True:
-            sleep(10)
+            sleep(5)
             channel.emit( 'still working' )
