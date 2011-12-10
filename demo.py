@@ -88,9 +88,10 @@ def _clienttest():
     channel = client.open( 'workerchannel' )
 
     spawn_later( 5, channel.emit, 'somework' )
+    spawn_later( 30, channel.emit, 'stop' )
+    
     for message in channel:
         print message
-
 
 spawn( _clienttest )
 
