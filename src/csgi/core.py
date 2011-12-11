@@ -1,6 +1,7 @@
 from gevent import socket, spawn, joinall, sleep
 
 from gevent.event import AsyncResult, Event
+from gevent import Timeout
 
 import re, os
 
@@ -132,42 +133,67 @@ class Socket:
         self.connections.remove( connection )
 
 
+# this should just behave like a file-like obj
 class Connection:
+    _has_wfile = False
+    _has_rfile = False
+
+    timeout_read = 1
 
     def __init__( self, gsocket, close_cb=lambda me: None ):
-        self.gsocket = gsocket
+        self._sock = gsocket
 
-        # somehow does not release read locks on clients
-        # when connection was closed
-        # self.rfile = gsocket.makefile('rb', -1)
-        self.wfile = gsocket.makefile('wb', 0)
+        self.flush = self.wfile.flush
+        self.write = self.wfile.write
 
-        #self.readline = self.rfile.readline
         self.read = gsocket.recv
 
         self.close_cb = close_cb
         log.debug("new connection")
 
-    def write( self, data ):
-        self.wfile.write( data )
-        self.wfile.flush()
+    @property
+    def rfile( self ):
+        self.rfile = self._sock.makefile('rb', -1)
+        self._has_rfile = True
+        return self.rfile
 
-    def readline( self, limit=None ):
-        l = ''
-        while True if not limit else len(l)<limit:
-            c = self.gsocket.recv(1)
-            if not c:
-                return c
-            l += c
-            if l[-2:] == '\r\n':
-                return l
+    @property
+    def wfile( self ):
+        self.wfile = self._sock.makefile('wb', 0)
+        self._has_wfile = True
+        return self.wfile
+
+    # somehow, the file-like obj does not release read locks on clients
+    # when connection was closed locally, so just interrupt it frequently
+    # which is still much faster than concatinating
+    def readline( self, limit=16384 ):
+        while not self.rfile.closed:
+            try:
+                with Timeout( self.timeout_read ):
+                    return self.rfile.readline( limit )
+            except:
+                pass
+        return ''
+
+    def __iter__( self ):
+        return self.rfile.__iter__()
+
+    def readlines( self, hint=None ):
+        self.readlines = self.rfile.readlines
+        return self.readlines( hint )
 
     def close( self ):
-        self.wfile.flush()
-        #self.rfile.close()
-        self.wfile.close()
-        self.gsocket._sock.close()
-        self.gsocket.close()
+        if self._has_rfile:
+            self.rfile.close()
+        if self._has_wfile:
+            self.wfile.close()
+
+        # does not help much .. reader still keep reading on client side :/
+        self._sock.shutdown(socket.SHUT_RDWR)
+
+        self._sock._sock.close()
+        self._sock.close()
+
         self.close_cb( self )
 
 

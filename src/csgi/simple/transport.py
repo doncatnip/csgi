@@ -11,7 +11,7 @@ class Line:
         self.handler\
             ( env
             , lambda: self._readlines( socket )
-            , lambda data: socket.write( data+'\r\n' )
+            , lambda data: socket.write( data+'\r\n' ) or socket.flush()
             )
 
     def _readlines( self, socket ):

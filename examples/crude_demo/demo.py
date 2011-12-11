@@ -104,7 +104,7 @@ def _clienttest():
 
     spawn_later( 1, channel.emit, 'somework' )
     spawn_later( 15, channel.emit, 'stop' )
-    spawn_later( 20, client.disconnect )
+    spawn_later( 16, client.disconnect )
 
     client.on_disconnect( lambda: log.info('connection closed') )
 
