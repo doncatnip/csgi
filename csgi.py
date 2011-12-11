@@ -3,14 +3,13 @@ import jsonrpcio
 from gevent import socket, spawn, joinall, sleep
 
 from gevent.queue import Queue
-from gevent.event import AsyncResult
+from gevent.event import AsyncResult, Event
 from gevent.pywsgi import _BAD_REQUEST_RESPONSE, format_date_time
 
 import re, os, time
 
 from uuid import uuid4 as uuid
 from mimetools import Message
-from gevent import Timeout
 
 import logging
 log = logging.getLogger( __name__ )
@@ -472,7 +471,7 @@ class transport:
             socket.write ( response )
 
 
-class ConnectionPool:
+class Connect:
 
     def __init__( self, socket, handler, create_env=lambda: {} ):
         self.socket = socket
@@ -481,10 +480,10 @@ class ConnectionPool:
         self.connections = set() # TODO the actual pool
 
     def __call__( self, *args, **kwargs ):
-        socket = self.socket.connect()
+        _socket = self.socket.connect()
         env = self.create_env()
         env.update\
-            ( { 'socket': self.socket
+            ( { 'socket': _socket
               , 'localclient': { 'args': args, 'kwargs': kwargs, 'result': AsyncResult() } 
               }
             )
@@ -492,23 +491,16 @@ class ConnectionPool:
         spawn\
             ( self.handler
             , env
-            , socket
+            , _socket
             )
         
         return env['localclient']['result'].get()
 
 
 
-
-
-
-def Listen( *args, **kwargs):
-    l = Listener( *args, **kwargs )
-    l.start()
-    return l
-
-class Listener:
+class Listen:
     def __init__( self, socket, handler, create_env=None ):
+
         self.socket = socket
         self.handler = handler
         if not create_env:
@@ -534,10 +526,9 @@ class Listener:
             log.exception( 'Could not handle connection at %s from %s' % (self.socket, address ) )
         finally:
             connection.close()
-            
+
     def stop( self ):
         log.info('Stop listening at %s (%s)' % (self.socket.address,self))
-        # TODO: run some kind of hooks for a clear handler shutdown
         self.socket.close()
 
         self._disconnected.set(True)
@@ -927,14 +918,9 @@ class event:
         def __init__( self, name, write ):
             self.name = name
             self._write = write
-            self._stopped = AsyncResult()
-            self._started = AsyncResult()
             self.callbacks = {}
+            self.disconnect_callbacks = {}
         
-        def listen( self ):
-            self._started.set(True)
-            return self._stopped.get()
-
         def emit( self, event ):
             if not self.is_open:
                 raise self.Closed()
@@ -942,17 +928,20 @@ class event:
             self._write( {'channel': self.name, 'event': event } )
 
         def run_callbacks( self, event ):
-            self._started.get()
             for (callback,(args,kwargs)) in self.callbacks.iteritems():
-                callback( self, event, *args, **kwargs )
+                callback( event, *args, **kwargs )
 
         def absorb( self, callback, *args, **kwargs ):
             #callback.leave = lambda: self.callbacks.pop( callback )
             self.callbacks[ callback ] = (args,kwargs)
 
-        def _close( self ):
+        def on_disconnect( self, callback, *args, **kwargs ):
+            self.disconnect_callbacks[ callback ] = ( args, kwargs )
+
+        def _disconnect( self ):
             self.is_open = False
-            self._stopped.set(True)
+            for (callback, (args,kwargs)) in self.disconnect_callbacks.iteritems():
+                callback( *args, **kwargs )
 
 
     class _ChannelConnector:
@@ -979,7 +968,7 @@ class event:
                     spawn( channel.run_callbacks, message['event'] )
                 
             for channel in self.channels.itervalues():
-                channel._close()
+                channel._disconnect()
 
     class Client:
         def __call__( self, env, read, write ):
@@ -996,9 +985,7 @@ class event:
             channels = {}
             for ( channel, handler) in self.handlers.iteritems():
                 channels[ channel ] = event._Channel( channel, write )
-
-            for ( channel, handler ) in self.handlers.iteritems():
-                spawn( handler, env, channels[ channel ] )
+                handler( env, channels[ channel ] )
 
             self._keepreading( read, channels )
 
@@ -1008,7 +995,7 @@ class event:
                 spawn( channels[ channel ].run_callbacks, message['event'] )
                 
             for channel in channels.itervalues():
-                channel._close()
+                channel._disconnect()
 
 
 from inspect import isclass

@@ -1,4 +1,4 @@
-from csgi import    Listener, Socket, ConnectionPool, Farm, LazyResource, Call,\
+from csgi import    Socket, Listen, Connect, Farm, LazyResource, Call,\
                     env, transport, http, wsgi, jsonrpc, rpc, event, marshal
 
 from logging import FileHandler
@@ -18,9 +18,11 @@ handler.setFormatter( logging.Formatter("%(asctime)s - %(name)s - %(levelname)s 
 
 logger.addHandler(handler)
 
-# daemon = DaemonContext( stderr=handler.stream, pidfile='pid' )
+daemon = DaemonContext( stderr=handler.stream, pidfile='pid' )
 
 # server setup
+
+log = logging.getLogger(__name__)
 
 import testresource
 
@@ -28,12 +30,12 @@ config = {'some':'config'}
 config['resource'] = resource = LazyResource( testresource, config )
 
 
-config['workerclient'] = ConnectionPool\
+config['workerclient'] = Connect\
     ( Socket( 'ipc://worker.sock' )
     , transport.Line( marshal.Json( event.Client() ) )
     )
 
-config['worker'] = workserver = Listener\
+config['worker'] = workserver = Listen\
     ( Socket( 'ipc://worker.sock' )
     , transport.Line( marshal.Json( event.Channel\
             ( { 'workerchannel': resource.Worker }
@@ -66,7 +68,7 @@ pubsub = jsonrpc.Server\
         )
     )
 
-config['server'] = server = Listener\
+config['server'] = server = Listen\
     ( Socket( 'tcp://localhost:8081')
     , transport.HTTP\
         ( env.Router\
@@ -83,8 +85,8 @@ config['server'] = server = Listener\
         )
     )
 
-def _print_message( channel, message ):
-    print message
+def _print_message( message ):
+    log.info( message )
 
 def _clienttest():
     client = config['workerclient']()
@@ -97,19 +99,11 @@ def _clienttest():
     spawn_later( 15, channel.emit, 'stop' )
     spawn_later( 20, workserver.stop )
 
-    channel.listen()
-    print "closed"
-
-spawn( _clienttest )
+    channel.on_disconnect( lambda: log.info('channel closed') )
 
 server = Farm( server, workserver )
-"""
 daemon.exit_hooks.append( server.stop )
 with daemon:
-"""
-try:
+    spawn( _clienttest )
+
     server.start()
-
-finally:
-    server.stop()
-
