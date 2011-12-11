@@ -95,6 +95,7 @@ def _print_message( message ):
     log.info( message )
 
 def _clienttest():
+    log.info('requesting client')
     client = config['workerclient']()
 
     channel = client.open( 'workerchannel' )

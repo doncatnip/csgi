@@ -137,7 +137,7 @@ class Connection:
     def __init__( self, gsocket, close_cb=lambda me: None ):
         self.gsocket = gsocket
 
-        # somehow does not notify release read locks on clients
+        # somehow does not release read locks on clients
         # when connection was closed
         # self.rfile = gsocket.makefile('rb', -1)
         self.wfile = gsocket.makefile('wb', 0)
@@ -152,9 +152,9 @@ class Connection:
         self.wfile.write( data )
         self.wfile.flush()
 
-    def readline( self, count ):
+    def readline( self, limit=None ):
         l = ''
-        while len(l)<count:
+        while True if not limit else len(l)<limit:
             c = self.gsocket.recv(1)
             if not c:
                 return c

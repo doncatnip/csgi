@@ -1,4 +1,3 @@
-from gevent import Timeout
 import logging
 
 log = logging.getLogger(__name__)
@@ -16,16 +15,8 @@ class Line:
             )
 
     def _readlines( self, socket ):
-
         while True:
-            line = None
-            try:
-                with Timeout(30):
-                    line = socket.readline()
-            except:
-                log.exception('e')
-                log.debug( socket.gsocket.__dict__ )
-                
+            line = socket.readline()
             if not line:
                 break
             yield line
