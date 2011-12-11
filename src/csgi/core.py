@@ -152,9 +152,9 @@ class Connection:
         self.wfile.write( data )
         self.wfile.flush()
 
-    def readline( self ):
+    def readline( self, count ):
         l = ''
-        while True:
+        while len(l)<count:
             c = self.gsocket.recv(1)
             if not c:
                 return c

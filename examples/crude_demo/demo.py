@@ -105,7 +105,7 @@ def _clienttest():
     spawn_later( 15, channel.emit, 'stop' )
     spawn_later( 20, client.disconnect )
 
-    channel.on_disconnect( lambda: log.info('channel closed') )
+    client.on_disconnect( lambda: log.info('connection closed') )
 
 server = Farm( server, workserver )
 daemon.exit_hooks.append( server.stop )

@@ -20,6 +20,7 @@ class LongPoll:
             self.client_event_queue = Queue()
             self.env = deepcopydict( env )
             self._id = uuid().hex
+            env['socket'] = self
 
             spawn( self._kill_idle )
             spawn\
@@ -52,9 +53,13 @@ class LongPoll:
             try:
                 self.ack_done.wait( timeout=self.ack_timeout )
             except:
-                self.client_event_queue.put( StopIteration )
-                self.server_event_queue.put( StopIteration )
-                del self.connections[ self._id ]
+                self.close()
+
+        def close( self ):
+            self.client_event_queue.put( StopIteration )
+            self.server_event_queue.put( StopIteration )
+            del self.connections[ self._id ]
+
 
     def __init__( self, handler, ack_timeout=20 ):
         self.handler = handler
