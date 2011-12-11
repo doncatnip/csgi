@@ -1,4 +1,7 @@
 *.pyc
 *.sock
+*.egg-info
 pid
 log
+build
+dist

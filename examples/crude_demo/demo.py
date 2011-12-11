@@ -1,12 +1,18 @@
-from csgi import    Socket, Listen, Connect, Farm, LazyResource, Call,\
-                    env, transport, http, wsgi, jsonrpc, rpc, event, marshal
+from csgi import    Socket, Listen, Connect, Farm, LazyResource,\
+                    env, http, jsonrpc, rpc, event
+
+from csgi.simple import marshal
+from csgi.simple.transport import Line as LineTransport
+
+from csgi.http import wsgi
+from csgi.daemonize import DaemonContext
 
 from logging import FileHandler
-from daemonize import DaemonContext
 
 from gevent import spawn, spawn_later
 
 import logging, re
+
 
 # logger setup
 
@@ -32,12 +38,12 @@ config['resource'] = resource = LazyResource( testresource, config )
 
 config['workerclient'] = Connect\
     ( Socket( 'ipc://worker.sock' )
-    , transport.Line( marshal.Json( event.Client() ) )
+    , LineTransport( marshal.Json( event.Client() ) )
     )
 
 config['worker'] = workserver = Listen\
     ( Socket( 'ipc://worker.sock' )
-    , transport.Line( marshal.Json( event.Channel\
+    , LineTransport( marshal.Json( event.Channel\
             ( { 'workerchannel': resource.Worker }
             ) ) )
     )
@@ -46,7 +52,7 @@ services = env.Router\
     ( ( 'service.echo', resource.EchoHandler.echo )
     , ( 'other.echo', resource.EchoHandler.echo )
     , by=env['rpc']['path']
-    , each=Call( env['route']['handler'] )
+    , each=rpc.Call( env['route']['handler'] )
     )
 
 channels = event.Channel\
@@ -70,7 +76,7 @@ pubsub = jsonrpc.Server\
 
 config['server'] = server = Listen\
     ( Socket( 'tcp://localhost:8081')
-    , transport.HTTP\
+    , http.Transport\
         ( env.Router\
             ( ( '/', resource.http.Hello )
             , ( re.compile('^(?P<approot>\/wsgiapp1).*$')
@@ -97,7 +103,7 @@ def _clienttest():
 
     spawn_later( 1, channel.emit, 'somework' )
     spawn_later( 15, channel.emit, 'stop' )
-    spawn_later( 20, workserver.stop )
+    spawn_later( 20, client.disconnect )
 
     channel.on_disconnect( lambda: log.info('channel closed') )
 
