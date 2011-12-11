@@ -29,6 +29,7 @@ class Input(object):
         v = self.get_chunk().readline( length )
         if not v:
             self.current_chunk = None
+        return v
 
     def readlines( self, hint=None ):
         return list( self )
