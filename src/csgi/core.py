@@ -226,12 +226,12 @@ class Connect:
 class Listen:
 
     def __init__( self, socket, handler, create_env=None ):
-
         self.socket = socket
         self.handler = handler
         if not create_env:
             create_env = lambda: {}
         self.create_env = create_env
+        self._disconnected = None
 
     def start( self ):
         self._disconnected = Event()
@@ -255,6 +255,8 @@ class Listen:
             connection.close()
 
     def stop( self ):
+        if not self.connected:
+            return
         log.info('Stop listening at %s (%s)' % (self.socket.address,self))
         self.socket.close()
 

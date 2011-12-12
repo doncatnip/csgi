@@ -14,6 +14,7 @@ from gevent import spawn, spawn_later
 import logging, re
 
 
+
 # logger setup
 
 logger = logging.getLogger('')
@@ -32,9 +33,11 @@ log = logging.getLogger(__name__)
 
 import testresource
 
+
 config = {'db_uri':'sqlite:///db.sqlite' }
 config['resource'] = resource = LazyResource( testresource, config )
 resource.wsgi.werkzeugapp.application.Shorty.init_database()
+
 
 config['workerclient'] = Connect\
     ( Socket( 'ipc://worker.sock' )
@@ -76,7 +79,7 @@ pubsub = jsonrpc.Server\
 
 config['server'] = server = Listen\
     ( Socket( 'tcp://localhost:8081')
-    , http.Transport\
+    , HTTPTransport\
         ( env.Router\
             ( ( '/', resource.http.Hello )
             , ( re.compile('^(?P<approot>\/wsgi/simple).*$')

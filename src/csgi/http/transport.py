@@ -213,7 +213,6 @@ class Transport:
         env['continue']=headers.get("expect",'').lower()=="continue"
         env['request']['header'] = headers
 
-        self.log.debug("%s\n%s" % (headers.items(), env))
         return True
 
     def _serialize_headers( self, env, connection):
