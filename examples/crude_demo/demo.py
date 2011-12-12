@@ -79,7 +79,7 @@ pubsub = jsonrpc.Server\
 
 config['server'] = server = Listen\
     ( Socket( 'tcp://localhost:8081')
-    , HTTPTransport\
+    , http.Transport\
         ( env.Router\
             ( ( '/', resource.http.Hello )
             , ( re.compile('^(?P<approot>\/wsgi/simple).*$')
