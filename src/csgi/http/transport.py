@@ -122,9 +122,15 @@ class Transport:
                 length = socket.readline()
                 if length == '0':
                     return
-                yield socket.read( int( length,16 ) )
+                data = socket.read( int( length,16 ) )
+                if not data or len(data)!=length:
+                    raise IOError("unexpected end of file while parsing chunked data")
+                yield data
         else:
-            yield socket.read( env['content_length'] )
+            data = socket.read( env['content_length'] )
+            if not data or len(data)!=env['content_length']:
+                raise IOError("unexpected end of file while parsing chunked data")
+            yield data
 
     def _check_http_version(self, version):
         if not version.startswith("HTTP/"):

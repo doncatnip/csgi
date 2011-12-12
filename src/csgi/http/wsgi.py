@@ -5,34 +5,63 @@ import sys, gevent, logging
 
 log = logging.getLogger(__name__)
 
+# since read() will potentially yield chunks and wsgi is not up for chunked
+# requests, we have to make a single stream out of it
 class Input(object):
 
     def __init__(self, read, chunked_input=False):
         self.reader = iter(read())
         self.current_chunk = None
-
-    def get_chunk( self ):
-        if not self.current_chunk:
-            v = self.reader.next()
-            if not v:
-                return ''
-            self.current_chunk = StringIO( v )
-        return  self.current_chunk
+      
+    def read_rest( self, length, line=False ):
+        if self.current_chunk:
+            data = self.current_chunk.readline( length ) if line\
+                    else self.current_chunk.read( length )
+            if not data:
+                self.current_chunk = None
+            else:
+                return data
+        return ''
 
     def read( self, length=None ):
-        if not length:
+        buffer = []
+        data = self.read_rest( length )
+        if data:
+            length -= len(data)
+            buffer.append( data )
+
+        if length is None:
             self.current_chunk = None
-            return self.reader.next()
-        v = self.get_chunk().read( length )
-        if not v:
-            self.current_chunk = None
-        return v
+            for data in self.reader:
+                buffer.append( self.reader.next() )
+        else:
+            rest = None
+            while True:
+                v = self.reader.next()
+                if not v:
+                    break
+                length -= len(v)
+                if length<=0:
+                    if length<0:
+                        rest = v[(-length):]
+                        v = v[:-length]
+                    buffer.append(v)
+                    break
+                buffer.append( v )
+
+            if rest:
+                self.current_chunk = StringIO( rest )
+
+        return ''.join( buffer )
 
     def readline( self, length=None ):
-        v = self.get_chunk().readline( length )
-        if not v:
-            self.current_chunk = None
-        return v
+        data = self.read_rest( length, True )
+        if data:
+            return data
+
+        v = self.reader.next()
+        self.current_chunk = StringIO( v )
+        return self.current_chunk.readline( length )
 
     def readlines( self, hint=None ):
         return list( self )
