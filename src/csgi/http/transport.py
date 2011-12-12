@@ -116,6 +116,7 @@ class Transport:
         if env['continue']:
             socket.write( _CONTINUE_RESPONSE )
             socket.flush()
+
         if not env['content_length']:
             while True:
                 length = socket.readline()
@@ -232,8 +233,8 @@ class Transport:
         status = env['status']
         if isinstance( status, int ):
             code = ''
-        elif ' ' in env['status']:
-            status, code = status.split(' ')
+        elif ' ' in status:
+            status, code = status.split(' ',1)
             status = int(status)
         else:
             code, status  = '', int( status )

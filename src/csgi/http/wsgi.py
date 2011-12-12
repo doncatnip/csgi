@@ -20,6 +20,9 @@ class Input(object):
         return  self.current_chunk
 
     def read( self, length=None ):
+        if not length:
+            self.current_chunk = None
+            return self.reader.next()
         v = self.get_chunk().read( length )
         if not v:
             self.current_chunk = None
@@ -51,13 +54,15 @@ class Server:
     def __init__( self, handler, approot=None ):
         self.handler = handler
         self.approot = approot
+        self.server_name = None
 
     def __call__( self, env, read, write ):
-        server_name = getattr( env['socket'], 'host', '' )
-        try:
-            server_name = socket.getfqdn( server_name )
-        except socket.error:
-            pass
+        if self.server_name is None:
+            self.server_name = getattr( env['socket'], 'host', '' )
+            try:
+                self.server_name = socket.getfqdn( self.server_name )
+            except socket.error:
+                pass
 
         env.setdefault('wsgi',{})
 
@@ -69,8 +74,7 @@ class Server:
             env['wsgi']['environ'] = environ =\
                 { 'GATEWAY_INTERFACE': 'CGI/1.1'
                 , 'SERVER_SOFTWARE': self._environ_software
-                , 'SCRIPT_NAME': self.approot or env.get('route',{}).get('approot','')
-                , 'SERVER_NAME': server_name
+                , 'SERVER_NAME': self.server_name
                 , 'SERVER_PORT': getattr( env['socket'], 'port', '' )
                 , 'wsgi.version': (1, 0)
                 , 'wsgi.multithread': False
@@ -80,6 +84,7 @@ class Server:
                 , 'wsgi.url_scheme': 'http' # TODO: https ( socket first )
                 }
 
+        environ['SCRIPT_NAME'] = self.approot or env.get('route',{}).get('approot','')
         environ['wsgi.input'] = Input( read, environ\
                     .get('HTTP_TRANSFER_ENCODING', '').lower() == 'chunked' )
 
@@ -88,7 +93,7 @@ class Server:
 
         environ['REQUEST_METHOD'] = env_http['method']
         if headers.typeheader is not None:
-            environ['CONTENT_TYPE'] = self.headers.typeheader
+            environ['CONTENT_TYPE'] = headers.typeheader
 
         length = headers.getheader('content-length')
         if length:

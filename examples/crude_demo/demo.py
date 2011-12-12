@@ -32,9 +32,9 @@ log = logging.getLogger(__name__)
 
 import testresource
 
-config = {'some':'config'}
+config = {'db_uri':'sqlite:///db.sqlite' }
 config['resource'] = resource = LazyResource( testresource, config )
-
+resource.wsgi.werkzeugapp.application.Shorty.init_database()
 
 config['workerclient'] = Connect\
     ( Socket( 'ipc://worker.sock' )
@@ -79,8 +79,11 @@ config['server'] = server = Listen\
     , http.Transport\
         ( env.Router\
             ( ( '/', resource.http.Hello )
-            , ( re.compile('^(?P<approot>\/wsgiapp1).*$')
-              , wsgi.Server( resource.http.WsgiApp )
+            , ( re.compile('^(?P<approot>\/wsgi/simple).*$')
+              , wsgi.Server( resource.wsgi.SimpleApp )
+              )
+            , ( re.compile('^(?P<approot>\/wsgi/werkzeug).*$')
+              , wsgi.Server( resource.wsgi.werkzeugapp.application.Shorty )
               )
             , ( '/service/jsonrpc', http.Method( POST=jsonservice ) )
             , ( '/pubsub/longpoll/jsonrpc', http.Method( POST=pubsub ) )

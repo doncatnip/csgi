@@ -145,8 +145,7 @@ class Connection:
 
         self.flush = self.wfile.flush
         self.write = self.wfile.write
-
-        self.read = gsocket.recv
+        self.read = self.rfile.read
 
         self.close_cb = close_cb
         log.debug("new connection")
@@ -431,6 +430,9 @@ class LazyResource:
                     )
 
             except ImportError:
+                if not hasattr( self.module, name ):
+                    raise
+
                 value = getattr( self.module, name )
                 if isclass( value ):
                     if self.config and hasattr(value, '__init__'):
