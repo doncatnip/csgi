@@ -208,7 +208,8 @@ class Connect:
         _socket = self.socket.connect()
         env = self.create_env()
         env.update\
-            ( { 'socket': _socket
+            ( { 'socket': self.socket
+              , 'connection': _socket
               , 'localclient': { 'args': args, 'kwargs': kwargs, 'result': AsyncResult() } 
               }
             )
@@ -243,7 +244,8 @@ class Listen:
             env = self.create_env()
             env.update\
                 ( remoteclient = { 'address':address }
-                , socket = connection
+                , socket = self.socket
+                , connection = connection
                 )
 
             self.handler( env, connection )

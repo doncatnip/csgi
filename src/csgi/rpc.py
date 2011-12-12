@@ -20,7 +20,7 @@ class LongPoll:
             self.client_event_queue = Queue()
             self.env = deepcopydict( env )
             self._id = uuid().hex
-            env['socket'] = self
+            env['connection'] = self
 
             spawn( self._kill_idle )
             spawn\

@@ -16,7 +16,7 @@ class Transport:
         self.force_chunked = force_chunked
         self.on_handler_fail = on_handler_fail
 
-    def __call__( self, env, socket ):
+    def __call__( self, env, connection ):
         env.setdefault( 'http', {} )
 
         env['http'] = env_http =\
@@ -36,21 +36,21 @@ class Transport:
             env_http['mode'] = 'response'
             env_http['response']['header'] = []
             
-            header = socket.readline( MAX_REQUEST_LINE )
+            header = connection.readline( MAX_REQUEST_LINE )
             if not header:
                 return
 
-            elif not self._read_request_header( env_http, socket, header ):
-                socket.write( _BAD_REQUEST_RESPONSE )
-                socket.flush()
+            elif not self._read_request_header( env_http, connection, header ):
+                connection.write( _BAD_REQUEST_RESPONSE )
+                connection.flush()
                 return
         else:
             env_http['mode'] = 'request'
 
         has_error = False
         if not abort:
-            env_http['_read'] = read = lambda: self._read( env_http, socket )
-            env_http['_write'] = write = lambda data: self._write( env_http, socket, data )
+            env_http['_read'] = read = lambda: self._read( env_http, connection )
+            env_http['_write'] = write = lambda data: self._write( env_http, connection, data )
             try:
                 self.handler( env, read, write )
             except:
@@ -71,21 +71,21 @@ class Transport:
         if has_error:
             self.log.exception('Could not handle HTTP request')
 
-        self._finish_response( env, socket )
+        self._finish_response( env, connection )
 
-    def _finish_response( self, env, socket ):
+    def _finish_response( self, env, connection ):
         env_http = env['http']
         env_http['is_handler_done'] = True
         if not env_http['is_header_send']:
-            self._write_nonchunked_response( env_http, socket )
+            self._write_nonchunked_response( env_http, connection )
         else:
-            socket.write(  "0\r\n\r\n"  )
-            socket.flush()
+            connection.write(  "0\r\n\r\n"  )
+            connection.flush()
 
         if env_http['keepalive']:
-            self( env, socket )
+            self( env, connection )
 
-    def _write( self, env, socket, data ):
+    def _write( self, env, connection, data ):
         if not isinstance( data, basestring ):
             raise Exception('Received non-text response: %s' % data )
 
@@ -98,36 +98,36 @@ class Transport:
                     env['result_on_hold'] = data
                     return
 
-                self._send_headers( env, socket )
+                self._send_headers( env, connection )
 
                 lastresult = env.pop('result_on_hold')
-                socket.write(  "%x\r\n%s\r\n" % (len(lastresult), lastresult) )
+                connection.write(  "%x\r\n%s\r\n" % (len(lastresult), lastresult) )
             else:
-                self._send_headers( env, socket )
+                self._send_headers( env, connection )
 
-        socket.write(  "%x\r\n%s\r\n" % (len(data), data) )
-        socket.flush()
+        connection.write(  "%x\r\n%s\r\n" % (len(data), data) )
+        connection.flush()
 
-    def _read( self, env, socket ):
+    def _read( self, env, connection ):
         if not env['is_header_read']:
-            header = socket.readline()
+            header = connection.readline()
             self._read_response_header( env, header )
             env['is_header_read'] = True
         if env['continue']:
-            socket.write( _CONTINUE_RESPONSE )
-            socket.flush()
+            connection.write( _CONTINUE_RESPONSE )
+            connection.flush()
 
         if not env['content_length']:
             while True:
-                length = socket.readline()
+                length = connection.readline()
                 if length == '0':
                     return
-                data = socket.read( int( length,16 ) )
+                data = connection.read( int( length,16 ) )
                 if not data or len(data)!=length:
                     raise IOError("unexpected end of file while parsing chunked data")
                 yield data
         else:
-            data = socket.read( env['content_length'] )
+            data = connection.read( env['content_length'] )
             if not data or len(data)!=env['content_length']:
                 raise IOError("unexpected end of file while parsing chunked data")
             yield data
@@ -144,7 +144,7 @@ class Transport:
     def _log_error( self, err, raw_requestline=''):
         self.log.error(err % (raw_requestline,) )
 
-    def _read_request_header(self, env, socket, raw_requestline):
+    def _read_request_header(self, env, connection, raw_requestline):
 
         requestline = raw_requestline.rstrip()
         words = requestline.split()
@@ -166,7 +166,7 @@ class Transport:
             self._log_error('Invalid HTTP method: %r', raw_requestline)
             return
 
-        headers = self.MessageClass( socket, 0)
+        headers = self.MessageClass( connection, 0)
         if headers.status:
             self._log_error('Invalid headers status: %r', headers.status)
             return
@@ -216,7 +216,7 @@ class Transport:
         self.log.debug("%s\n%s" % (headers.items(), env))
         return True
 
-    def _serialize_headers( self, env, socket):
+    def _serialize_headers( self, env, connection):
         keepalive = env.get('keepalive', None)
 
         response_headers =\
@@ -263,18 +263,18 @@ class Transport:
             
         return ''.join(towrite)
 
-    def _send_headers( self, env, socket ):
-        socket.write( '%s\r\n' % self._serialize_headers( env, socket ) )
+    def _send_headers( self, env, connection ):
+        connection.write( '%s\r\n' % self._serialize_headers( env, connection ) )
         env['is_header_send'] = True
         
-    def _write_nonchunked_response( self, env, socket ):
+    def _write_nonchunked_response( self, env, connection ):
         content = env.pop('result_on_hold','' )
         
         env['response']['header'].append(('Content-Length', str(len(content))))
         response = "%s\r\n%s"\
-            %   ( self._serialize_headers( env, socket )
+            %   ( self._serialize_headers( env, connection )
                 , content
                 )
 
-        socket.flush()
-        socket.write ( response )
+        connection.flush()
+        connection.write ( response )

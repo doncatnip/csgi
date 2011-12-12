@@ -1,4 +1,4 @@
-class WsgiApp:
+class SimpleApp:
 
     def __call__( self, environ, start_response ):
         body = '<html><head><title>wsgi app</title></head><body><h1>hello wsgi</h1></body></html>'

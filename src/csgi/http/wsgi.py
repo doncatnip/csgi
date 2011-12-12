@@ -1,7 +1,8 @@
 from StringIO import StringIO
-from gevent import socket
 
 import sys, gevent, logging
+
+from gevent import socket
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +61,9 @@ class Input(object):
             return data
 
         v = self.reader.next()
+        if not v:
+            return v
+
         self.current_chunk = StringIO( v )
         return self.current_chunk.readline( length )
 
@@ -86,10 +90,13 @@ class Server:
         self.server_name = None
 
     def __call__( self, env, read, write ):
-        if self.server_name is None:
-            self.server_name = getattr( env['socket'], 'host', '' )
+        sock = env['socket']
+        if not hasattr(sock,'fqdn'):
+            sock.fqdn = getattr( sock, 'host', '' )
+            sock.port = getattr( sock, 'port', '' )
+
             try:
-                self.server_name = socket.getfqdn( self.server_name )
+                sock.fqdn = socket.getfqdn( sock.fqdn )
             except socket.error:
                 pass
 
@@ -102,9 +109,11 @@ class Server:
         if not environ:
             env['wsgi']['environ'] = environ =\
                 { 'GATEWAY_INTERFACE': 'CGI/1.1'
+                , 'SERVER_PROTOCOL': env['http']['request_version']
                 , 'SERVER_SOFTWARE': self._environ_software
-                , 'SERVER_NAME': self.server_name
-                , 'SERVER_PORT': getattr( env['socket'], 'port', '' )
+                , 'SERVER_NAME': sock.fqdn
+                , 'SERVER_PORT': sock.port
+                , 'REMOTE_ADDR': env['remoteclient']['address'][0]
                 , 'wsgi.version': (1, 0)
                 , 'wsgi.multithread': False
                 , 'wsgi.multiprocess': False
@@ -127,12 +136,11 @@ class Server:
         length = headers.getheader('content-length')
         if length:
             environ['CONTENT_LENGTH'] = length
-        environ['SERVER_PROTOCOL'] = 'HTTP/1.0'
 
-        environ['REMOTE_ADDR'] = env['remoteclient']['address'][0]
 
+
+        keys_added = set()
         for (key,value) in headers.items():
-            #key, value = header.split(':', 1)
             key = key.replace('-', '_').upper()
             if key not in ('CONTENT_TYPE', 'CONTENT_LENGTH'):
                 value = value.strip()
@@ -144,13 +152,20 @@ class Server:
                         environ[key] += ',' + value
                 else:
                     environ[key] = value
+                    keys_added.add( key )
 
-        result = self.handler( environ, lambda status, headers, exc_info=None\
+        try:
+            result = self.handler( environ, lambda status, headers, exc_info=None\
                 : self._start_response( env, write, status, headers, exc_info ) )
+        finally:
+            for key in keys_added:
+                del environ[key]
 
         for data in result:
             if data:
                 write(data)
+
+
 
     def _start_response(self, env, write, status, headers, exc_info=None):
         if exc_info:

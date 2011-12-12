@@ -38,7 +38,7 @@ class _Channel:
             callback( *args, **kwargs )
 
     def disconnect( self ):
-        self.env['socket'].close()
+        self.env['connection'].close()
 
 class _ChannelConnector:
 
@@ -74,7 +74,7 @@ class _ChannelConnector:
             callback( *args, **kwargs )
 
     def disconnect( self ):
-        self.env['socket'].close()
+        self.env['connection'].close()
 
     def on_disconnect( self, callback, *args, **kwargs ):
         self.disconnect_callbacks.append( ( callback, args, kwargs ) )

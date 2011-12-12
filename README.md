@@ -18,7 +18,7 @@ all the way up to some handler ( which could be a html page, or some
 subscriber/publisher ). This architecture should work for client and server
 implementations in a similar way.
 
-Every transport receives ( env, socket ) per connection as arguments and
+Every transport receives ( env, connection ) per connection as arguments and
 passes a read and write method to its handler while populating env with
 transport-specific stuff.
 

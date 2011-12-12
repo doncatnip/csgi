@@ -7,11 +7,11 @@ class Line:
     def __init__( self, handler ):
         self.handler = handler
 
-    def __call__( self, env, socket ):
+    def __call__( self, env, connection ):
         self.handler\
             ( env
-            , lambda: self._readlines( socket )
-            , lambda data: socket.write( data+'\r\n' ) or socket.flush()
+            , lambda: self._readlines( connection )
+            , lambda data: connection.write( data+'\r\n' ) or connection.flush()
             )
 
     def _readlines( self, socket ):
