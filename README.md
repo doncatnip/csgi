@@ -33,18 +33,18 @@ Status: prototype; License: Public Domain
 
 Implemented so far:
 
-basic stuff: some socket/listen/connect abstraction, line transport \o/,
+* basic stuff: some socket/listen/connect abstraction, line transport \o/,
 generic routing by env-variables, json marshalling, a daemon helper using
 python-daemon
 
-html: transport, wsgi server, simple method hook (html.Method)
+* http: transport, wsgi server, simple method hook (http.Method)
 
-rpc: jsonrpc server, longpoll interface
+* rpc: jsonrpc server, longpoll interface
 
-events ( aka publish/subscribe ): channel interface - usable with json
+* events ( aka publish/subscribe ): channel interface - usable with json
 marshalling ( e.g. via unix socket ) or jsonrpc longpolling so far
 
-+it should be quite easy to implement further protocols/transports.
+* +it should be quite easy to implement further protocols/transports.
 
 Everything quite alpha, but take a look at examples/crude_demo if you still
 want to know more.
