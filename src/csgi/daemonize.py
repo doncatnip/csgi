@@ -23,10 +23,11 @@ class DaemonContext( _DaemonContext ):
         if argv:
             cmd = argv.pop(0)
             if cmd=='stop':
-                os.kill( pidfile.read_pid(), signal.SIGTERM )
+                self._stop( pidfile )
                 sys.exit(0)
-            if cmd=='restart':
-                os.kill( pidfile.read_pid(), signal.SIGTERM )
+
+            elif cmd=='restart':
+                self._stop( pidfile )
                 c = 10
                 while pidfile.is_locked():
                     c-=1
@@ -38,6 +39,10 @@ class DaemonContext( _DaemonContext ):
                 cmd = [sys.executable, filename]+argv
                 cmd.append('&')
                 os.system( ' '.join(cmd) )
+                exit(0)
+
+            elif cmd!='start':
+                sys.stderr.write('try %s %s start|stop|restart\r\n' % (sys.executable, sys.argv[0]))
                 exit(0)
 
         if pidfile.is_locked():
@@ -85,4 +90,11 @@ class DaemonContext( _DaemonContext ):
     def run_exit_hooks( self, signal, frame ):
         for hook in self.exit_hooks:
             hook()
+
+    def _stop( self, pidfile ):
+        pid = pidfile.read_pid()
+        if pid:
+            os.kill( pid, signal.SIGTERM )
+        else:
+            log.info('Daemon seems not to be running' )
 
