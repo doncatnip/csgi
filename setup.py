@@ -1,6 +1,4 @@
 from setuptools import setup, find_packages
-from distutils.extension import Extension
-from Cython.Distutils import build_ext
 
 setup\
     ( name = 'csgi'
@@ -15,8 +13,6 @@ setup\
     , namespace_packages = ['csgi', 'csgi.http' ]
     , include_package_data = True
     , install_requires = [ "gevent" ]
-    , cmdclass = {'build_ext': build_ext}
-    , ext_modules = [Extension("csgi.http.ctransport", ["src/csgi/http/transport.c"])]
     , classifiers =\
         [ "Development Status :: 3 - Alpha"
         , "Intended Audience :: Developers"

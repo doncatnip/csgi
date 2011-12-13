@@ -117,6 +117,7 @@ def _clienttest():
 server = Farm( server, workserver )
 daemon.exit_hooks.append( server.stop )
 with daemon:
-    spawn( _clienttest )
-
+    spawn_later( 1, _clienttest )
+    #import cProfile
+    #cProfile.run('server.start()')
     server.start()

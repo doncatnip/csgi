@@ -294,9 +294,13 @@ class Env:
                     raise SyntaxError( 'Routes must be unique' )
 
                 routes.add( key )
-                if not hasattr( key, 'match' ) :
+                if isinstance( key, basestring ):
                     self.named_routes[ key ] = handler
                 else:
+                    if hasattr( key, 'match' ):
+                        key = key.match
+                    if not callable( key ):
+                        raise SyntaxError( 'Invalid route - must be a string, callable or an object with a match() method' )
                     self.handler.append( (key, handler ) )
 
             self.by = params.pop('by')
@@ -317,7 +321,7 @@ class Env:
 
             if not handler:
                 for (key,handler_) in self.handler:
-                    match = key.match( value )
+                    match = key( value )
                     if match:
                         groups = match.groupdict()
                         if groups:

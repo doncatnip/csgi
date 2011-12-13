@@ -100,27 +100,24 @@ class Server:
             except socket.error:
                 pass
 
-        env.setdefault('wsgi',{})
-
-        environ = env['wsgi'].get('environ',None)
         env_http = env['http']
         headers = env_http['request']['header']
 
-        if not environ:
-            env['wsgi']['environ'] = environ =\
-                { 'GATEWAY_INTERFACE': 'CGI/1.1'
-                , 'SERVER_PROTOCOL': env['http']['request_version']
-                , 'SERVER_SOFTWARE': self._environ_software
-                , 'SERVER_NAME': sock.fqdn
-                , 'SERVER_PORT': sock.port
-                , 'REMOTE_ADDR': env['remoteclient']['address'][0]
-                , 'wsgi.version': (1, 0)
-                , 'wsgi.multithread': False
-                , 'wsgi.multiprocess': False
-                , 'wsgi.run_once': False
-                , 'wsgi.errors': sys.stderr
-                , 'wsgi.url_scheme': 'http' # TODO: https ( socket first )
-                }
+        environ =\
+            { 'GATEWAY_INTERFACE': 'CGI/1.1'
+            , 'SERVER_PROTOCOL': env['http']['request_version']
+            , 'SERVER_SOFTWARE': self._environ_software
+            , 'SERVER_NAME': sock.fqdn
+            , 'SERVER_PORT': sock.port
+            , 'REMOTE_ADDR': env['remoteclient']['address'][0]
+            , 'wsgi.version': (1, 0)
+            , 'wsgi.multithread': False
+            , 'wsgi.multiprocess': False
+            , 'wsgi.run_once': False
+            , 'wsgi.errors': sys.stderr
+            , 'wsgi.url_scheme': 'http' # TODO: https ( socket first )
+            , 'csgi.env': env
+            }
 
         environ['SCRIPT_NAME'] = self.approot or env.get('route',{}).get('approot','')
         environ['wsgi.input'] = Input( read, environ\
@@ -138,8 +135,6 @@ class Server:
             environ['CONTENT_LENGTH'] = length
 
 
-
-        keys_added = set()
         for (key,value) in headers.items():
             key = key.replace('-', '_').upper()
             if key not in ('CONTENT_TYPE', 'CONTENT_LENGTH'):
@@ -152,14 +147,9 @@ class Server:
                         environ[key] += ',' + value
                 else:
                     environ[key] = value
-                    keys_added.add( key )
 
-        try:
-            result = self.handler( environ, lambda status, headers, exc_info=None\
-                : self._start_response( env, write, status, headers, exc_info ) )
-        finally:
-            for key in keys_added:
-                del environ[key]
+        result = self.handler( environ, lambda status, headers, exc_info=None\
+            : self._start_response( env, write, status, headers, exc_info ) )
 
         for data in result:
             if data:
