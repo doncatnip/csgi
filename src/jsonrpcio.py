@@ -1,8 +1,9 @@
 import logging
-import json
+import json as _json
 import datetime
 
 log = logging.getLogger(__name__)
+
 
 JSONRPC_VERSION_1_0 = "1.0"     # http://groups.google.com/group/json-rpc/web/json-1-0-spec
 JSONRPC_VERSION_2_0 = "2.0"     # http://groups.google.com/group/json-rpc/web/json-rpc-2-0
@@ -81,12 +82,12 @@ def defaultErrorConstructor( exceptionObj ):
     return (exceptionObj.code, exceptionObj.message, extra )
 
 
-class JSONDateTimeEncoder(json.JSONEncoder):
+class JSONDateTimeEncoder(_json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, (datetime.date, datetime.datetime)):
             return obj.isoformat()
         else:
-            return json.JSONEncoder.default(self, obj)
+            return _json.JSONEncoder.default(self, obj)
 
 def datetime_decoder(d):
     if isinstance(d, list):
@@ -115,17 +116,25 @@ def datetime_decoder(d):
     elif isinstance(d, dict):
         return dict(result)
 
-loads = _loads = lambda text: json.loads(text, object_hook=datetime_decoder)
-dumps = _dumps = lambda obj: json.dumps(obj, cls=JSONDateTimeEncoder)
+loads = lambda text: _json.loads(text, object_hook=datetime_decoder)
+dumps = lambda obj: _json.dumps(obj, cls=JSONDateTimeEncoder)
+
+import types
+
+json = types.ModuleType('jsonrpcio.json')
+
+json.loads = loads
+json.dumps = dumps
+
 
 class Parser:
     version = None
 
     def __init__( self, loads=None, dumps=None, errorConstructor=defaultErrorConstructor ):
         if not loads:
-            loads = _loads
+            loads = json.loads
         if not dumps:
-            dumps = _dumps
+            dumps = json.dumps
 
         self.errorConstructor = errorConstructor
         self.loads = loads
@@ -145,6 +154,7 @@ class Parser:
             extra = {}
 
         success = True
+        isBatch = False
         parser = self.parsers[0]
 
         try:

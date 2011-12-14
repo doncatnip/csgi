@@ -346,13 +346,13 @@ class Env:
         def _log_error( self, error ):
             log.error( error )
 
-    def __call__( self, *args ):
+    def __call__( self, *args, **kwargs ):
         env = args[0]
         value = env
         for part in self.path:
             value = value[ part ]
         if callable( value ):
-            return value( *args )
+            return value( *args, **kwargs )
         else:
             return value
 

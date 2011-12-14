@@ -3,7 +3,7 @@ import logging
 
 log = logging.getLogger( __name__ )
 
-def on_handler_fail( env, read, write ):
+def _on_handler_fail( env, read, write ):
     write\
         ( env['rpc']['parser'].encodeError\
             ( env['rpc']['failure']
@@ -16,15 +16,15 @@ class Server:
     def __init__( self, handler, on_handler_fail=None, loads=None, dumps=None ):
         self.handler = handler
         self._nowrite = lambda data: None
+
         if not on_handler_fail:
-            on_handler_fail = on_handler_fail
+            on_handler_fail = _on_handler_fail
             
         self.on_handler_fail = on_handler_fail
         self.parser = jsonrpcio.Parser( loads=loads, dumps=dumps )
 
     def __call__( self, env, read, write ):
         env['rpc'] = {'type': 'jsonrpc'}
-
         for request in read():
             ( success
             , data
@@ -55,10 +55,10 @@ class Server:
                 else:
                     jsonwrite = self._nowrite
 
-                self._call_handler( env, data, jsonwrite, parser )
+                self._call_handler( env, data, jsonwrite, write, parser )
 
 
-    def _call_handler( self, env, data, jsonwrite, parser ):
+    def _call_handler( self, env, data, jsonwrite, write, parser ):
         env['rpc']['path'] = data['method']
         env['rpc']['requestID'] = data['id']
         env['rpc']['version'] = data['version']
@@ -79,7 +79,7 @@ class Server:
             log.exception('Could not handle JSON-RPC request')
             env['rpc']['failure'] = e
             env['rpc']['parser'] = parser
-            self.on_handler_fail( env, jsonread, jsonwrite )
+            self.on_handler_fail( env, jsonread, write )
 
 
 
