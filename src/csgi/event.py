@@ -1,4 +1,6 @@
 from gevent import spawn
+import logging
+log = logging.getLogger( __name__ )
 
 class _Channel:
     class Closed( Exception ):
@@ -22,7 +24,10 @@ class _Channel:
 
     def run_callbacks( self, event ):
         for (callback,args,kwargs) in self.callbacks:
-            callback( event, *args, **kwargs )
+            try:
+                callback( event, *args, **kwargs )
+            except:
+                log.exception( 'Could not run callback' )
 
     def absorb( self, callback, *args, **kwargs ):
         self.callbacks.append( (callback,args,kwargs) )
@@ -94,7 +99,10 @@ class Channel:
         channels = {}
         for ( channel, handler) in self.handlers.iteritems():
             channels[ channel ] = _Channel( env, channel, write )
-            handler( env, channels[ channel ] )
+            try:
+                handler( env, channels[ channel ] )
+            except:
+                log.exception( 'Could not publish to channel: %s' % channel )
 
         self._keepreading( read, channels )
 
