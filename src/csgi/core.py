@@ -422,10 +422,13 @@ class ArgRouter:
 from inspect import isclass
 
 class LazyResource:
-    def __init__( self, module, config=None ):
+    def __init__( self, module, *args, **kwargs ):
         self.module = module
         self.loaded = {}
-        self.config = config
+        self.args = (args,kwargs)
+
+        if hasattr( module, 'init' ):
+            module.init( *args, **kwargs )
 
     def __getattr__( self, name ):
         if not name in self.loaded:
@@ -434,8 +437,9 @@ class LazyResource:
 
                 value = LazyResource\
                     ( getattr( self.module, name )
-                    , self.config
+                    , *self.args, **self.kwargs
                     )
+
 
             except ImportError:
                 if not hasattr( self.module, name ):
@@ -443,10 +447,7 @@ class LazyResource:
 
                 value = getattr( self.module, name )
                 if isclass( value ):
-                    if self.config and hasattr(value, '__init__'):
-                        value = value( self.config )
-                    else:
-                        value = value()
+                    value = value( *self.args, **self.kwargs )
 
             self.loaded[ name ] = value
 

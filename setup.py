@@ -12,7 +12,7 @@ setup\
     , package_dir = {'':'src'}
     , namespace_packages = ['csgi', 'csgi.http' ]
     , include_package_data = True
-    , install_requires = [ "gevent" ]
+    , install_requires = [ "gevent", "python-daemon" ]
     , classifiers =\
         [ "Development Status :: 3 - Alpha"
         , "Intended Audience :: Developers"

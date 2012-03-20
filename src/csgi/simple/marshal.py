@@ -1,4 +1,4 @@
-import jsonrpcio
+from .. import jsonrpcio
 
 class Json:
     def __init__( self, handler, loads=None, dumps=None):

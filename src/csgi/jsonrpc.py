@@ -1,4 +1,5 @@
-import jsonrpcio
+from . import jsonrpcio
+
 import logging
 
 log = logging.getLogger( __name__ )
