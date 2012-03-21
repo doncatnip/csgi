@@ -43,7 +43,7 @@ def parseSocketAddress( address ):
             raise SyntaxError('%s is not a valid address ( (tcp://host[:port]|ipc://file) is required )' % address ) 
         ( protocol, host ) = m.groups()
 
-    return ( protocol.lower(), host.lower(), port )
+    return ( protocol.lower(), host, port )
 
 
 
@@ -425,7 +425,8 @@ class LazyResource:
     def __init__( self, module, *args, **kwargs ):
         self.module = module
         self.loaded = {}
-        self.args = (args,kwargs)
+        self.args = args
+        self.kwargs = kwargs
 
         if hasattr( module, 'init' ):
             module.init( *args, **kwargs )
