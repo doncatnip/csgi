@@ -447,8 +447,8 @@ class LazyResource:
                     raise
 
                 value = getattr( self.module, name )
-                if isclass( value ):
-                    value = value( *self.args, **self.kwargs )
+            if isclass( value ):
+                value = value( *self.args, **self.kwargs )
 
             self.loaded[ name ] = value
 
