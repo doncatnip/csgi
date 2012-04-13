@@ -7,6 +7,9 @@ from gevent import spawn
 
 from uuid import uuid4 as uuid
 
+import logging
+log = logging.getLogger(__name__)
+
 class LongPoll:
 
     class Connection:
@@ -37,13 +40,16 @@ class LongPoll:
             self._kill_idle()
 
         def next( self, confirm_ID, current_ID ):
+            log.debug("NEXT %s" % confirm_ID)
             if confirm_ID == self.ack_id:
                 self.ack_id = None
                 self.ack_done.set()
                 self.current_result = AsyncResult()
                 spawn( self._check_next, current_ID )
 
-            return self.current_result.get( )
+            result = self.current_result.get( )
+            log.debug("POLL RESULT %s - %s" % (confirm_ID, result))
+            return result
 
         def emit( self, event ):
             self.client_event_queue.put( event )

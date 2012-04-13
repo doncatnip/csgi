@@ -2,6 +2,19 @@ import logging
 import json as _json
 import datetime
 
+__has_rfc3339__ = True
+try:
+    from rfc3339 import rfc3339
+except ImportError:
+    __has_rfc3339__ = False
+
+__has_iso8601__ = True
+try:
+    import iso8601
+except ImportError:
+    __has_iso8601__ = False
+
+
 log = logging.getLogger(__name__)
 
 
@@ -85,6 +98,8 @@ def defaultErrorConstructor( exceptionObj ):
 class JSONDateTimeEncoder(_json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, (datetime.date, datetime.datetime)):
+            if __has_rfc3339__:
+                return rfc3339( obj, utc=True, use_system_timezone=False )
             return obj.isoformat()
         else:
             return _json.JSONEncoder.default(self, obj)
@@ -97,17 +112,23 @@ def datetime_decoder(d):
     result = []
     for k,v in pairs:
         if isinstance(v, basestring):
-            try:
-                # The %f format code is only supported in Python >= 2.6.
-                # For Python <= 2.5 strip off microseconds
-                # v = datetime.datetime.strptime(v.rsplit('.', 1)[0],
-                #     '%Y-%m-%dT%H:%M:%S')
-                v = datetime.datetime.strptime(v, '%Y-%m-%dT%H:%M:%S.%f')
-            except ValueError:
+            if __has_iso8601__:
                 try:
-                    v = datetime.datetime.strptime(v, '%Y-%m-%d').date()
-                except ValueError:
+                    v = iso8601.parse_date( v )
+                except (iso8601.ParseError,TypeError,):
                     pass
+            else:
+                try:
+                    # The %f format code is only supported in Python >= 2.6.
+                    # For Python <= 2.5 strip off microseconds
+                    # v = datetime.datetime.strptime(v.rsplit('.', 1)[0],
+                    #     '%Y-%m-%dT%H:%M:%S')
+                    v = datetime.datetime.strptime(v, '%Y-%m-%dT%H:%M:%S.%f')
+                except ValueError:
+                    try:
+                        v = datetime.datetime.strptime(v, '%Y-%m-%d').date()
+                    except ValueError:
+                        pass
         elif isinstance(v, (dict, list)):
             v = datetime_decoder(v)
         result.append((k, v))

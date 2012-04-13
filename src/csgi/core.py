@@ -189,7 +189,6 @@ class Connection:
 
         # does not help much .. reader still keep reading on client side :/
         self._sock.shutdown(socket.SHUT_RDWR)
-
         self._sock._sock.close()
         self._sock.close()
 
@@ -249,8 +248,9 @@ class Listen:
                 )
 
             self.handler( env, connection )
-        except:
-            log.exception( 'Could not handle connection at %s from %s' % (self.socket, address ) )
+        except Exception as e:
+            if not isinstance( e, socket.error ) or e.errno != 32:
+                log.exception( 'Could not handle connection at %s from %s' % (self.socket, address ) )
         finally:
             connection.close()
 

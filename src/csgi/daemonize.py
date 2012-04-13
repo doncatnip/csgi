@@ -4,7 +4,6 @@ from daemon import DaemonContext as _DaemonContext
 import gevent
 
 import sys,os, signal, logging
-log = logging.getLogger(__name__)
 
 class DaemonContext( _DaemonContext ):
     def __init__( self, pidfile, **kwargs ):
@@ -16,9 +15,9 @@ class DaemonContext( _DaemonContext ):
 
         if isinstance( pidfile, basestring ):
             if pidfile[0] != '/':
-                pidfile = '%s/pidfile' % path
+                pidfile = '%s/%s' % (path, pidfile )
 
-            pidfile = PIDLockFile( '%s/pid' % path )
+            pidfile = PIDLockFile( pidfile )
 
         if argv:
             cmd = argv.pop(0)
@@ -40,17 +39,22 @@ class DaemonContext( _DaemonContext ):
                 cmd.append('&')
                 os.system( ' '.join(cmd) )
                 exit(0)
-
+            """
             elif cmd!='start':
                 sys.stderr.write('try %s %s start|stop|restart\r\n' % (sys.executable, sys.argv[0]))
                 exit(0)
+            """
 
         if pidfile.is_locked():
             sys.stderr.write( 'Daemon seems to be already running\r\n' )
             sys.exit(-1)
 
-        self.exit_hooks = kwargs.get('exit_hooks',[])
+        self.exit_hooks = kwargs.pop('exit_hooks',[])
         files_preserve = kwargs.pop('files_preserve',[])
+        stderr = kwargs.get('stderr')
+        if stderr:
+            files_preserve.append( stderr )
+
         for logger in kwargs.pop('loggers',()):
             for handler in logger.handlers:
                 if hasattr( handler, 'stream' ):
@@ -88,6 +92,7 @@ class DaemonContext( _DaemonContext ):
         gevent.signal(signal.SIGTERM, self.run_exit_hooks, signal.SIGTERM, None )
 
     def run_exit_hooks( self, signal, frame ):
+        print "running exit hooks ..."
         for hook in self.exit_hooks:
             hook()
 
@@ -96,5 +101,5 @@ class DaemonContext( _DaemonContext ):
         if pid:
             os.kill( pid, signal.SIGTERM )
         else:
-            log.info('Daemon seems not to be running' )
+            sys.stderr.write('Daemon seems not to be running\r\n' )
 
