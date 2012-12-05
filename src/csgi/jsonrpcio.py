@@ -294,12 +294,18 @@ class _1_0(Parser):
             error = JSONRPCProtocol_ParseError\
                 ( "'params' must be an Array", requestID=requestID )
 
-        result =\
-            { 'method': method
-            , 'params': params
-            , 'version': self.version
-            , 'id': requestID
-            }
+        if error:
+            result = self.encodeError\
+                ( error
+                , requestID=requestID
+                )
+        else:
+            result =\
+                { 'method': method
+                , 'params': params
+                , 'version': self.version
+                , 'id': requestID
+                }
 
         return\
             ( not error
@@ -322,7 +328,6 @@ class _2_0(_1_0):
     version = JSONRPC_VERSION_2_0
 
     class BatchResponse:
-        _no_response = lambda data: None
 
         def __init__( self, request, parser, extra ):
             self.request = request
@@ -343,17 +348,15 @@ class _2_0(_1_0):
                     continue
 
                 requestID = partial.get('id',None)
-                if requestID is None:
-                    writeback = self._no_response
-                else:
-                    writeback = lambda data: self.response.append\
-                        ( { 'id': request['id']
-                          , 'result': data
+                result = yield partial
+
+                if requestID:
+                    self.response.append\
+                        ( { 'id': requestID
+                          , 'result': result
                           , 'jsonrpc': self.parser.version
                           }
                         )
-
-                yield (partial, writeback)
 
         def encode( self ):
             encoded = self.parser.encode( self.response )
@@ -385,7 +388,6 @@ class _2_0(_1_0):
             , isBatch=False
             ):
 
-        success = True
         if isinstance( parsed, list ):
             if isBatch:
                 raise JSONRPCProtocol_ParseError\
@@ -438,7 +440,6 @@ class _2_0(_1_0):
 
             if error:
                 if not isBatch:
-                    success = False
                     result = self.encodeError\
                         ( error
                         , requestID=requestID
@@ -446,15 +447,16 @@ class _2_0(_1_0):
                 else:
                     raise error
 
-            result =\
-                { 'method': method
-                , 'params': params
-                , 'version': self.version
-                , 'id': requestID
-                }
+            else:
+                result =\
+                    { 'method': method
+                    , 'params': params
+                    , 'version': self.version
+                    , 'id': requestID
+                    }
 
         return\
-            ( success
+            ( not error
             , result
             , isBatch
             )

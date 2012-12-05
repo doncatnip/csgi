@@ -39,8 +39,9 @@ class Server:
                 continue
             
             if isBatch:
-                for (partial, writeback) in data:
-                    self._call_handler( env, partial, writeback, parser )
+                i = iter(data)
+                for partial in i:
+                    self._call_handler( env, partial, i.send, write, parser )
 
                 write( data.encode() )
             else:

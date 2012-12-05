@@ -183,9 +183,15 @@ class Connection:
 
     def close( self ):
         if self._has_rfile:
-            self.rfile.close()
+            try:
+                self.rfile.close()
+            except socket.error:
+                pass
         if self._has_wfile:
-            self.wfile.close()
+            try:
+                self.wfile.close()
+            except socket.error:
+                pass
 
         # does not help much .. reader still keep reading on client side :/
         self._sock.shutdown(socket.SHUT_RDWR)
@@ -251,6 +257,8 @@ class Listen:
         except Exception as e:
             if not isinstance( e, socket.error ) or e.errno != 32:
                 log.exception( 'Could not handle connection at %s from %s' % (self.socket, address ) )
+            else:
+                log.debug('Remote client lost.')
         finally:
             connection.close()
 

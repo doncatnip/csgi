@@ -40,7 +40,6 @@ class LongPoll:
             self._kill_idle()
 
         def next( self, confirm_ID, current_ID ):
-            log.debug("NEXT %s" % confirm_ID)
             if confirm_ID == self.ack_id:
                 self.ack_id = None
                 self.ack_done.set()
@@ -48,7 +47,6 @@ class LongPoll:
                 spawn( self._check_next, current_ID )
 
             result = self.current_result.get( )
-            log.debug("POLL RESULT %s - %s" % (confirm_ID, result))
             return result
 
         def emit( self, event ):
@@ -56,10 +54,10 @@ class LongPoll:
 
         def _kill_idle( self ):
             self.ack_done.clear()
-            try:
-                self.ack_done.wait( timeout=self.ack_timeout )
-            except:
+            self.ack_done.wait( timeout=self.ack_timeout )
+            if not self.ack_done.isSet():
                 self.close()
+
 
         def close( self ):
             self.client_event_queue.put( StopIteration )
