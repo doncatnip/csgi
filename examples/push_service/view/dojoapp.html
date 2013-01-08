@@ -1,0 +1,60 @@
+<link rel="stylesheet" type="text/css" href="{{ dojo.url }}/dijit/themes/dijit.css"/>
+<link rel="stylesheet" type="text/css" href="{{ dojo.url }}/dijit/themes/claro/claro.css"/>
+
+<script type='text/javascript'>
+    var dojoConfig =
+        { async: true
+        , parseOnLoad: true
+        , debugAtAllConsts: true
+        , app:
+            { rpcSettings:
+                { 'api':
+                    { envelope:'JSON-RPC-2.0'
+                    , transport:'POST'
+                    , target: '/service/api'
+                    , services:
+                        { 'register': []
+                        , 'login': []
+                        , 'update.email': []
+                        }
+                    }
+                , 'events':
+                    { envelope:'JSON-RPC-2.0'
+                    , transport:'POST'
+                    , target:'/service/events'
+                    , services:
+                        { 'connect': {}
+                        , 'emit': {}
+                        , 'next': {}
+                        }
+                    }
+                }
+            }
+        , baseUrl: '{{ dojo.url }}/'
+        , packages:
+            [ { name: 'dojo'
+              , location: 'dojo'
+              , main: 'main'
+              , lib: '.'
+              }
+            , { name: 'dijit'
+              , location: 'dijit'
+              , main: 'main'
+              , lib: '.'
+              }
+            , { name: 'dojox'
+              , location: 'dojox'
+              , main: 'main'
+              , lib: '.'
+              }
+            , { name: 'app'
+              , location: '/js/push_service'
+              , lib: '.'
+              , main: 'main'
+              }
+            ]
+        };
+
+</script>
+
+<script src="{{ dojo.url }}/dojo/dojo.js" type="text/javascript" ></script>

@@ -111,6 +111,7 @@ class Socket:
                 sleep(0.5*exec_count)
                 exec_count+=1
             else:
+                log.debug("New connection at %s" % self.address )
                 exec_count=0
 
     def close( self ):
@@ -148,7 +149,6 @@ class Connection:
         self.read = self.rfile.read
 
         self.close_cb = close_cb
-        log.debug("new connection")
 
     @property
     def rfile( self ):
@@ -193,7 +193,6 @@ class Connection:
             except socket.error:
                 pass
 
-        # does not help much .. reader still keep reading on client side :/
         self._sock.shutdown(socket.SHUT_RDWR)
         self._sock._sock.close()
         self._sock.close()
