@@ -42,7 +42,7 @@ define
         );
 
       return dojo.declare
-        ( 'ee.lib.pubsub.LongPoll'
+        ( 'app.LongPoll'
         , null
         , { constructor: function( service ) {
               this._channels = {};
@@ -118,7 +118,6 @@ define
 
               return d;
             }
-          , isResubscribing: false
           , getChannel: function( address, name, args, options ) {
               if ( this._channels[ address ] === undefined )
                 this._channels[ address ] = new Channel

@@ -1,4 +1,5 @@
 from jinja2 import Environment, FileSystemLoader
+from database import db
 import os
 
 _path = os.path.dirname(__file__)
@@ -14,10 +15,13 @@ def _500( env, read, write ):
 class Home:
     def __init__( self, dojo_url ):
         jinja_env = Environment\
-            ( loader=FileSystemLoader('%s/../view' % _path)
+            ( loader=FileSystemLoader('%s/view' % _path)
             )
         jinja_env.globals.update( { 'dojo': { 'url': dojo_url } } )
         self.jinja_env = jinja_env
 
     def __call__( self, env, read, write ):
+        session = env['http']['request']['header'].get('cookie',{}).get('session')
+        if session:
+            user = 
         write( self.jinja_env.get_template( 'main.html' ).render().encode('utf8') )

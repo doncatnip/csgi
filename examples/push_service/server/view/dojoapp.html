@@ -4,7 +4,6 @@
 <script type='text/javascript'>
     var dojoConfig =
         { async: true
-        , parseOnLoad: true
         , debugAtAllConsts: true
         , app:
             { rpcSettings:
@@ -58,3 +57,9 @@
 </script>
 
 <script src="{{ dojo.url }}/dojo/dojo.js" type="text/javascript" ></script>
+
+<script type="text/javascript" >
+  require(["dojo/parser", "app/Main"], function(parser){
+    parser.parse();
+  });
+</script>

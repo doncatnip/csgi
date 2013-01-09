@@ -1,13 +1,12 @@
 from gevent import sleep, spawn
 from datetime import datetime
 
-from pymongo import Connection
 from uuid import uuid4 as uuid
 
-connection = Connection()
-db = connection.csgi_push_service_example
+from settings import db
 
 profile_channels = {}
+guest = { 'name': 'guest', 'role': 'guest' }
 
 def pinger( channel ):
     while True:
@@ -28,8 +27,10 @@ class push:
         if session:
             user = db.user.find_one( {'session': session } )
             del user['password']
-            channel.emit( user )
+        else:
+            user = guest
 
+        channel.emit( user )
         profile_channels[ session ] = channel
         channel.on_disconnect( lambda: profile_channels.pop( session ) )
 
@@ -48,7 +49,14 @@ class api:
 
     @classmethod
     def register( env, name, password, email ):
-        db.user.insert( { 'name': name, 'password': password, 'email': email }, safe=True )
+        db.user.insert\
+            ( { 'name': name
+              , 'password': password
+              , 'email': email
+              , 'role': 'user'
+              }
+            , safe=True
+            )
         return login( env, name, password )
 
 
@@ -62,5 +70,7 @@ class api:
                 , { 'email': new_mail }
                 , new=True
                 )
+
+            del user['password']
             profile_channels[ session ].emit( user )
 

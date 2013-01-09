@@ -58,7 +58,7 @@ events = jsonrpc.Server\
 
 dojo_url = 'http://ajax.googleapis.com/ajax/libs/dojo/1.8.2'  
 server = Listen\
-    ( Socket( 'tcp://localhost:8081')
+    ( Socket( 'ipc://run/socket')
     , http.Transport\
         ( env.Router\
             ( ( '/', website.Home( dojo_url ) )
@@ -73,7 +73,7 @@ server = Listen\
 
 # configure daemon
 
-daemon = DaemonContext( stderr=handler.stream, pidfile='pid' )
+daemon = DaemonContext( stderr=handler.stream, pidfile='run/pid' )
 daemon.exit_hooks.append( server.stop )
 
 with daemon:
