@@ -30,15 +30,17 @@ api = jsonrpc.Server\
     ( env.Router\
         ( ( 'register', api.register )
         , ( 'login', api.login )
-        , ( 'update.email', api.update_email )
+        , ( 'logout', api.logout )
+        , ( 'update.profile', api.update_profile )
         , by=env['rpc']['path']
+        , each=rpc.Call( env['route']['handler'] )
         )
     )
 
 # configure push services
 channels = event.Channel\
     ( { 'ping': push.ping
-      , 'user.profile': push.userProfile
+      , 'user.profile': push.user_profile
       }
     )
 

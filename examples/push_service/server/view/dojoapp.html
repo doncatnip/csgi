@@ -14,7 +14,8 @@
                     , services:
                         { 'register': []
                         , 'login': []
-                        , 'update.email': []
+                        , 'logout': []
+                        , 'update.profile': []
                         }
                     }
                 , 'events':
@@ -59,7 +60,5 @@
 <script src="{{ dojo.url }}/dojo/dojo.js" type="text/javascript" ></script>
 
 <script type="text/javascript" >
-  require(["dojo/parser", "app/Main"], function(parser){
-    parser.parse();
-  });
+  require(["app/App"]);
 </script>

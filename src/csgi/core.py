@@ -61,6 +61,10 @@ class Socket:
         if self.protocol not in ('ipc','tcp'):
             raise SyntaxError( 'Protocol %s not supported' % (self.protocol) )
 
+        if self.protocol == 'ipc':
+            self.host = os.path.abspath( self.host )
+            self.address = '%s://%s' % (self.protocol,self.host)
+
     def connect( self ):
         if self.protocol == 'ipc':
             gsocket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

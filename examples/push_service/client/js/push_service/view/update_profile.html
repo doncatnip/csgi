@@ -1,0 +1,23 @@
+<div encType="multipart/form-data" data-dojo-attach-point="containerNode">
+  <h2>Update User Profile</h2>
+
+  <label for="register_user_name">Name</label>
+  <input  name="name"
+         required="true"
+         data-dojo-type="dijit/form/ValidationTextBox"
+         id="update_user_name"
+         value="${name}"
+  >
+  </input>
+
+  <label for="register_user_email">Email</label>
+  <input  name="email"
+         required="true"
+         data-dojo-type="dijit/form/ValidationTextBox"
+         id="update_user_email"
+         value="${email}"
+  >
+  </input>
+
+  <button data-dojo-type="dijit/form/Button" type="submit">update</button>
+</div>

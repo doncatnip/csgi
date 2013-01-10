@@ -1,6 +1,6 @@
 from jinja2 import Environment, FileSystemLoader
-from database import db
 import os
+import lib
 
 _path = os.path.dirname(__file__)
 
@@ -21,7 +21,5 @@ class Home:
         self.jinja_env = jinja_env
 
     def __call__( self, env, read, write ):
-        session = env['http']['request']['header'].get('cookie',{}).get('session')
-        if session:
-            user = 
+        session = lib.get_session( env )
         write( self.jinja_env.get_template( 'main.html' ).render().encode('utf8') )
