@@ -1,4 +1,6 @@
-<div encType="multipart/form-data" data-dojo-attach-point="containerNode">
+<form encType="multipart/form-data"
+  data-dojo-attach-point="containerNode"
+  data-dojo-attach-event="onsubmit:_onSubmit">
   <h2>Update User Profile</h2>
 
   <label for="register_user_name">Name</label>
@@ -20,4 +22,4 @@
   </input>
 
   <button data-dojo-type="dijit/form/Button" type="submit">update</button>
-</div>
+</form>

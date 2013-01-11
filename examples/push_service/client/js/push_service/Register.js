@@ -17,7 +17,8 @@ define
             , postCreate: function() {
                 this.inherited( arguments );
               }
-            , onSubmit: function() {
+            , onSubmit: function( evt ) {
+                evt.preventDefault();
                 this.inherited( arguments );
                 if (this.validate()) {
                   config.app.remoteApi.register( this.getValues() );
