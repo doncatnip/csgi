@@ -1,4 +1,4 @@
-define( ["dojo", "dojox" ], function(dojo, dojox) {
+define( ['dojo/_base/json', "dojox" ], function(json, dojox) {
 
   function jsonRpcEnvelope(version){
     return {
@@ -14,7 +14,7 @@ define( ["dojo", "dojox" ], function(dojo, dojox) {
           d.jsonrpc = version;
         }
         return {
-          data: dojo.toJson(d),
+          data: json.toJson(d),
           handleAs: 'json',
           contentType: 'application/json',
           transport: "POST"
@@ -35,7 +35,7 @@ define( ["dojo", "dojox" ], function(dojo, dojox) {
             return err;
           }
 
-          obj = dojo.fromJson(obj.responseText);
+          obj = json.fromJson(obj.responseText);
         }
         if(obj.error) {
           var e = new Error(obj.error.message || obj.error);

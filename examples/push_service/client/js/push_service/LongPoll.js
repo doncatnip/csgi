@@ -1,8 +1,9 @@
 define
-  ( [ 'dojo'
+  ( [ 'dojo/_base/declare'
+    , 'dojo/_base/Deferred'
     ]
-  , function( dojo) {
-      var Channel = dojo.declare
+  , function( declare, defer ) {
+      var Channel = declare
         ( 'Channel'
         , null
         , { constructor: function( service, clientID, address, name, args, options ) {
@@ -22,7 +23,7 @@ define
             }
           , emit: function( data ) {
               var self = this;
-              dojo.when( this.clientID, function( clientID ) {
+              defer.when( this.clientID, function( clientID ) {
                 self.service.emit( [clientID, {'channel': self.address, 'event':data }] );
               });
             }
@@ -41,7 +42,7 @@ define
           }
         );
 
-      return dojo.declare
+      return declare
         ( 'app.LongPoll'
         , null
         , { constructor: function( service ) {
@@ -82,7 +83,7 @@ define
                 if (this.clientID!==undefined) 
                   return this.clientID;
 
-                this.clientID = new dojo.Deferred();
+                this.clientID = new defer();
                 attempt = 0;
               }
 
@@ -92,7 +93,7 @@ define
                .runCallbacks({type:'attempt',data:{count:attempt}});
 
               var self = this;
-              dojo.when
+              defer.when
                 ( self.service.connect( )
                 , function( response ) {
                     var clientID = response[0]
