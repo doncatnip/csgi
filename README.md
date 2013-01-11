@@ -29,7 +29,7 @@ A request/connection is considered finished when its handler returns.
 
 Components should be as independant as possible.
 
-Status: prototype; License: Public Domain
+Status: beta; License: Public Domain
 
 Implemented so far:
 
@@ -46,7 +46,7 @@ marshalling ( e.g. via unix socket ) or jsonrpc longpolling so far
 
 * +it should be quite easy to implement further protocols/transports.
 
-Please take a look at examples/push_example if you want to know more.
+Please take a look at examples/push_service if you want to know more.
 Further, examples/crude_demo, despite being crude, might be able to give you an
 idea how to serve wsgi applications and how you let your servers communicate
 with each other.
