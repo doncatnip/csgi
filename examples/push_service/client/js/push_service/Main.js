@@ -41,8 +41,6 @@ define
                     , function( registerPane, loginPane ) {
                         self.content.set("content", registerPane );
                         self.loginStatus.set("content", loginPane );
-                        /*registerPane.placeAt( self.content );
-                        loginPane.placeAt( self.loginStatus );*/
                       }
                     );
                 } else {

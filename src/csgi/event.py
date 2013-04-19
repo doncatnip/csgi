@@ -15,7 +15,7 @@ class _Channel:
         self.callbacks = []
         self.close_callbacks = []
         self.env = env
-    
+
     def emit( self, event ):
         if not self.is_open:
             raise self.Closed()
@@ -110,6 +110,6 @@ class Channel:
         for message in read():
             channel = message['channel']
             spawn( channels[ channel ].run_callbacks, message['event'] )
-            
+
         for channel in channels.itervalues():
             channel.close()

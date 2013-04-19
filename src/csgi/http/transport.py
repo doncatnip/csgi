@@ -2,14 +2,14 @@ from gevent.pywsgi import _BAD_REQUEST_RESPONSE, _CONTINUE_RESPONSE, MAX_REQUEST
 from mimetools import Message
 from urllib import unquote
 
-import time, logging
+import time
+import logging
 
-
+log = logging.getLogger(__name__)
 
 class Transport:
     # TODO: client
     MessageClass = Message
-    log = logging.getLogger( '%s.HTTP' % __name__ )
 
     def __init__( self, handler, force_chunked=False, on_handler_fail=None ):
         self.handler = handler
@@ -35,7 +35,7 @@ class Transport:
             env_http['is_header_read'] = True
             env_http['mode'] = 'response'
             env_http['response']['header'] = []
-            
+
             header = connection.readline( MAX_REQUEST_LINE )
             if not header:
                 return
@@ -69,7 +69,7 @@ class Transport:
             env_http['keepalive'] = False
 
         if has_error:
-            self.log.exception('Could not handle HTTP request')
+            log.exception('Could not handle HTTP request')
 
         self._finish_response( env, connection )
 
@@ -120,7 +120,7 @@ class Transport:
         if not env['content_length']:
             while True:
                 length = connection.readline()
-                if length == '0':
+                if not length or length == '0':
                     return
                 data = connection.read( int( length,16 ) )
                 if not data or len(data)!=length:
@@ -138,11 +138,11 @@ class Transport:
         version = tuple(int(x) for x in version[5:].split("."))  # "HTTP/"
         if version[1] < 0 or version < (0, 9) or version >= (2, 0):
             return False
-        
+
         return True
 
     def _log_error( self, err, raw_requestline=''):
-        self.log.error(err % (raw_requestline,) )
+        log.error(err % (raw_requestline,) )
 
     def _read_request_header(self, env, connection, raw_requestline):
 
@@ -200,7 +200,7 @@ class Transport:
             path, query = path.split('?', 1)
         else:
             path, query = path, ''
-        
+
         env.update\
             ( method=command
             , content_length=content_length
@@ -223,7 +223,7 @@ class Transport:
                     ) for key, value in env[ env['mode'] ]['header'] ]
 
         response_headers_list = [x[0] for x in response_headers ]
-        
+
         if 'Date' not in response_headers_list:
             response_headers.append(('Date', format_date_time(time.time())))
 
@@ -259,16 +259,16 @@ class Transport:
 
         if keepalive is not None:
             env['keepalive'] = keepalive
-            
+
         return ''.join(towrite)
 
     def _send_headers( self, env, connection ):
         connection.write( '%s\r\n' % self._serialize_headers( env, connection ) )
         env['is_header_send'] = True
-        
+
     def _write_nonchunked_response( self, env, connection ):
         content = env.pop('result_on_hold','' )
-        
+
         env['response']['header'].append(('Content-Length', str(len(content))))
         response = "%s\r\n%s"\
             %   ( self._serialize_headers( env, connection )
