@@ -380,7 +380,7 @@ class _2_0(_1_0):
             return None
 
         return self.encode(  {'id': requestID, 'result':result['result'], 'jsonrpc': self.version } )
- 
+
     def decodeRequest\
             ( self
             , parsed
@@ -407,11 +407,11 @@ class _2_0(_1_0):
             requestID = parsed.pop('id', None)
             version = parsed.pop('jsonrpc', Undefined)
             method = parsed.pop('method', Undefined)
-            params = parsed.pop('params', Undefined)
+            params = parsed.pop('params', [])
 
             if Undefined in ( method, params, version ):
                 raise JSONRPCProtocol_ParseError\
-                    ( "Members 'jsonrpc', 'method' and 'params' are required"
+                    ( "Members 'jsonrpc' and 'method' are required"
                     )
 
             if parsed:
@@ -433,7 +433,6 @@ class _2_0(_1_0):
                 error = JSONRPCProtocol_ParseError\
                     ( "'method' must be a String"  )
 
-            
             if not isinstance( params, (list,dict) ):
                 error = JSONRPCProtocol_ParseError\
                     ( "'params' must be an array or dict" )
