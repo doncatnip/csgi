@@ -235,6 +235,9 @@ class Transport:
         elif ('Connection', 'close') in response_headers:
             keepalive = False
 
+        if keepalive and 'Connection' not in response_headers_list:
+            response_headers.append(('Connection','Keep-Alive'))
+
         status = env['status']
         if isinstance( status, int ):
             code = ''
@@ -275,5 +278,6 @@ class Transport:
                 , content
                 )
 
-        connection.flush()
         connection.write ( response )
+
+        connection.flush()

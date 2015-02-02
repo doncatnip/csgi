@@ -13,7 +13,7 @@ class Input(object):
     def __init__(self, read, chunked_input=False):
         self.reader = iter(read())
         self.current_chunk = None
-      
+
     def read_rest( self, length, line=False ):
         if self.current_chunk:
             data = self.current_chunk.readline( length ) if line\
@@ -154,8 +154,6 @@ class Server:
         for data in result:
             if data:
                 write(data)
-
-
 
     def _start_response(self, env, write, status, headers, exc_info=None):
         if exc_info:
