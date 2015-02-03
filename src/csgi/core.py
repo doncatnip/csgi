@@ -248,7 +248,7 @@ class Listen:
             self.i += 1
             env = self.create_env()
             env.update\
-                ( remoteclient={'address': address}
+                ( remoteclient={'address': address or ('', '',)}
                 , socket=self.socket
                 , connection=connection
                 )
