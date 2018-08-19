@@ -1,7 +1,8 @@
+import logging
+
 from csgi import Socket, Listen
 from csgi.simple import transport
 
-import logging
 logging.basicConfig(level=logging.DEBUG)
 
 def echo(env, read, write):

@@ -1,6 +1,7 @@
+import email
+
 from gevent.pywsgi import _BAD_REQUEST_RESPONSE, _CONTINUE_RESPONSE, MAX_REQUEST_LINE, format_date_time
-from mimetools import Message
-from urllib import unquote
+from urllib.parse import unquote
 
 import time
 import logging
@@ -9,7 +10,6 @@ log = logging.getLogger(__name__)
 
 class Transport:
     # TODO: client
-    MessageClass = Message
 
     def __init__( self, handler, force_chunked=False, on_handler_fail=None ):
         self.handler = handler
@@ -166,7 +166,7 @@ class Transport:
             self._log_error('Invalid HTTP method: %r', raw_requestline)
             return
 
-        headers = self.MessageClass( connection, 0)
+        headers = email.message_from_file( connection )
         if headers.status:
             self._log_error('Invalid headers status: %r', headers.status)
             return

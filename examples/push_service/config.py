@@ -2,7 +2,6 @@ from gevent import monkey
 monkey.patch_all()
 
 from csgi import Socket, Listen, Connect, env, http, jsonrpc, rpc, event
-from csgi.daemonize import DaemonContext
 
 from logging import FileHandler
 
@@ -78,7 +77,8 @@ server = Listen\
 daemon = DaemonContext( stderr=handler.stream, pidfile='run/pid' )
 daemon.exit_hooks.append( server.stop )
 
-with daemon:
+#with daemon:
     #import cProfile
     #cProfile.run('server.start()')
-    server.start()
+
+server.start()

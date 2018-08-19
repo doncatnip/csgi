@@ -82,7 +82,7 @@ class Socket:
 
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s.bind(self.host)
-            os.chmod(self.host, 0770)
+            os.chmod(self.host, 0o770)
             if self.user:
                 import pwd
 
@@ -103,7 +103,7 @@ class Socket:
         while True:
             try:
                 connection, addr = self.listeningsock.accept()
-                connection = Connection(socket.socket(_sock=connection), self._remove_connection)
+                connection = Connection(connection, self._remove_connection)
                 self.connections.add(connection)
                 yield (connection, addr)
             except KeyboardInterrupt:
@@ -140,13 +140,12 @@ class Socket:
 
 # this should just behave like a file-like obj
 class Connection:
-    _has_fileobj = False
-
     timeout_read = 30
 
     def __init__(self, gsocket, close_cb=lambda me: None):
         self._sock = gsocket
 
+        self.fileobj = self._sock.makefile('rw')
         self.flush = self.fileobj.flush
         self.write = self.fileobj.write
         self.read = self.fileobj.read
@@ -160,11 +159,6 @@ class Connection:
         #fileiter = iter(self.fileobj)
         #self.readline = lambda limit=16384: fileiter.next()
 
-    @property
-    def fileobj(self):
-        self.fileobj = self._sock.makefile()
-        self._has_fileobj = True
-        return self.fileobj
 
     """
     def readline(self, limit=16384):
@@ -181,15 +175,13 @@ class Connection:
         return self.fileobj.__iter__()
 
     def readlines(self, hint=None):
-        self.readlines = self.fileobj.readlines
-        return self.readlines(hint)
+        return self.fileobj.readlines(hint)
 
     def close(self):
-        if self._has_fileobj:
-            try:
-                self.fileobj.close()
-            except socket.error:
-                pass
+        try:
+            self.fileobj.close()
+        except socket.error:
+            pass
         try:
             self._sock.shutdown(socket.SHUT_RDWR)
             self._sock._sock.close()
