@@ -290,7 +290,7 @@ class Env:
                     raise SyntaxError('Routes must be unique')
 
                 routes.add(key)
-                if isinstance(key, basestring):
+                if isinstance(key, str):
                     self.named_routes[key] = handler
                 else:
                     if hasattr(key, 'match'):
