@@ -11,7 +11,7 @@ setup\
     , packages = find_packages('src')
     , package_dir = {'':'src'}
     , include_package_data = True
-    , install_requires = [ "gevent", "python-daemon" ]
+    , install_requires = [ "gevent" ]
     , classifiers =\
         [ "Development Status :: 3 - Alpha"
         , "Intended Audience :: Developers"

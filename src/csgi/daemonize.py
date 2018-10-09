@@ -92,7 +92,7 @@ class DaemonContext( _DaemonContext ):
         gevent.signal(signal.SIGTERM, self.run_exit_hooks, signal.SIGTERM, None )
 
     def run_exit_hooks( self, signal, frame ):
-        print "running exit hooks ..."
+        print("running exit hooks ...")
         for hook in self.exit_hooks:
             hook()
 

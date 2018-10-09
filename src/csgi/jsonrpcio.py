@@ -111,7 +111,7 @@ def datetime_decoder(d):
         pairs = d.items()
     result = []
     for k,v in pairs:
-        if isinstance(v, basestring):
+        if isinstance(v, str):
             if __has_iso8601__:
                 try:
                     v = iso8601.parse_date( v )
@@ -286,7 +286,7 @@ class _1_0(Parser):
         # so render everything as 1.0 response ( no raise )
 
         error = None
-        if not isinstance( method, basestring ):
+        if not isinstance( method, str ):
             error = JSONRPCProtocol_ParseError\
                 ( "'method' must be a String", requestID=requestID )
 
@@ -429,7 +429,7 @@ class _2_0(_1_0):
             # so render everything as 2.0 response ( no raise )
 
             error = None
-            if not isinstance( method, basestring ):
+            if not isinstance( method, str ):
                 error = JSONRPCProtocol_ParseError\
                     ( "'method' must be a String"  )
 

@@ -160,7 +160,7 @@ class Server:
             try:
                 if env['http']['is_header_send']:
                     # Re-raise original exception if headers sent
-                    raise exc_info[0], exc_info[1], exc_info[2]
+                    raise (exc_info[0], exc_info[1], exc_info[2])
             finally:
                 # Avoid dangling circular ref
                 exc_info = None
